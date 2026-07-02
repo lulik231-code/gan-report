@@ -325,7 +325,7 @@ function ReceiptModal({ budget, onClose, onSave, toast }) {
   )
 }
 
-function BudgetPanel({ budget, receipts, onAddPulse, onAddReceipt, onEdit, onDeleteReceipt, toast }) {
+function BudgetPanel({ budget, receipts, onAddPulse, onAddReceipt, onEdit, onDeleteReceipt, onDeletePulse, toast }) {
   const [showPulse, setShowPulse] = useState(false), [showReceipt, setShowReceipt] = useState(false)
   const isCity = budget.type === 'city'
   const income = budget.received || 0, remaining = income - budget.spent
@@ -361,7 +361,7 @@ function BudgetPanel({ budget, receipts, onAddPulse, onAddReceipt, onEdit, onDel
           </div>) })}</div>
       )}
       {pulses.length > 0 && (
-        <div className="log-block"><div className="log-title"><TrendingUp size={16} /> פעימות הכנסה</div><div className="log-list">{pulses.map((p, i) => <div className="log-row" key={p.id}><span className="log-idx">{i + 1}</span><div className="log-main"><div className="log-a">{nis(p.amount)}</div>{p.note && <div className="log-note">{p.note}</div>}</div><span className="log-date">{heDate(p.date)}</span></div>)}</div></div>
+        <div className="log-block"><div className="log-title"><TrendingUp size={16} /> פעימות הכנסה</div><div className="log-list">{pulses.map((p, i) => <div className="log-row" key={p.id}><span className="log-idx">{i + 1}</span><div className="log-main"><div className="log-a">{nis(p.amount)}</div>{p.note && <div className="log-note">{p.note}</div>}</div><span className="log-date">{heDate(p.date)}</span><button className="log-del" onClick={() => { if (confirm('למחוק את הפעימה? הסכום יתבטל גם מהקטגוריות.')) onDeletePulse(p.id) }} title="מחיקת פעימה"><Trash2 size={15} /></button></div>)}</div></div>
       )}
       <div className="log-block">
         <div className="log-title"><Receipt size={16} /> קבלות {receipts.length > 0 && <span className="dim">({receipts.length})</span>}</div>
@@ -440,6 +440,12 @@ function Dashboard({ user, onLogout, toast }) {
   }
   const saveBudget = (type, data) => setBudgets(b => ({ ...b, [type]: { ...(b[type] || {}), ...data } }))
   const addPulse = (type, pulse) => setBudgets(b => { const bd = b[type]; const nb = { ...bd, received: (bd.received || 0) + pulse.amount, pulses: [...(bd.pulses || []), pulse] }; if (type === 'parents') nb.cats = bd.cats.map(c => ({ ...c, allocated: c.allocated + pulse.amount * (c.pct / 100) })); return { ...b, [type]: nb } })
+  const delPulse = (type, id) => setBudgets(b => {
+    const bd = b[type]; const p = (bd.pulses || []).find(x => x.id === id); if (!p) return b
+    const nb = { ...bd, received: Math.max(0, (bd.received || 0) - p.amount), pulses: bd.pulses.filter(x => x.id !== id) }
+    if (type === 'parents') nb.cats = bd.cats.map(c => ({ ...c, allocated: Math.max(c.spent, c.allocated - p.amount * (c.pct / 100)) }))
+    return { ...b, [type]: nb }
+  })
   const addReceipt = (type, r) => { setReceipts(rs => ({ ...rs, [type]: [r, ...(rs[type] || [])] })); setBudgets(b => { const bd = b[type]; const nb = { ...bd, spent: (bd.spent || 0) + r.amount }; if (type === 'parents' && r.catId) nb.cats = bd.cats.map(c => c.id === r.catId ? { ...c, spent: c.spent + r.amount } : c); return { ...b, [type]: nb } }) }
   const delReceipt = (type, id) => { const r = (receipts[type] || []).find(x => x.id === id); if (!r) return; setReceipts(rs => ({ ...rs, [type]: rs[type].filter(x => x.id !== id) })); setBudgets(b => { const bd = b[type]; const nb = { ...bd, spent: Math.max(0, (bd.spent || 0) - r.amount) }; if (type === 'parents' && r.catId) nb.cats = bd.cats.map(c => c.id === r.catId ? { ...c, spent: Math.max(0, c.spent - r.amount) } : c); return { ...b, [type]: nb } }) }
   const current = budgets[tab]
@@ -457,7 +463,7 @@ function Dashboard({ user, onLogout, toast }) {
         {!current ? (
           <div className="empty"><div className="empty-ic">{tab === 'city' ? <Building2 size={46} strokeWidth={1.5} /> : <Users size={46} strokeWidth={1.5} />}</div><h2>{tab === 'city' ? 'מעקב קצבת עירייה' : 'הגדרת תשלומי הורים'}</h2><p>{tab === 'city' ? 'אין צורך בסכום שנתי מראש — פשוט רשמי כל פעימת הכנסה מהעירייה וצלמי קבלות, והיתרה תתעדכן לבד.' : 'הגדירי כמה משלם כל הורה, מספר הילדים, וההתפלגות בין הקטגוריות — או ייבאי אקסל.'}</p><button className="btn btn-primary" onClick={() => setSetupFor(tab)}><Plus size={18} /> {tab === 'city' ? 'התחלת מעקב' : 'הגדרת תקציב'}</button></div>
         ) : (
-          <BudgetPanel budget={current} receipts={receipts[tab] || []} onAddPulse={(p) => addPulse(tab, p)} onAddReceipt={(r) => addReceipt(tab, r)} onDeleteReceipt={(id) => delReceipt(tab, id)} onEdit={() => setSetupFor(tab)} toast={toast} />
+          <BudgetPanel budget={current} receipts={receipts[tab] || []} onAddPulse={(p) => addPulse(tab, p)} onAddReceipt={(r) => addReceipt(tab, r)} onDeleteReceipt={(id) => delReceipt(tab, id)} onDeletePulse={(id) => delPulse(tab, id)} onEdit={() => setSetupFor(tab)} toast={toast} />
         )}
       </main>
       {setupFor === 'city' && <CitySetup existing={budgets.city} onClose={() => setSetupFor(null)} onSave={(d) => saveBudget('city', d)} toast={toast} />}
