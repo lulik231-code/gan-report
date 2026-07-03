@@ -368,3 +368,6 @@ input, select { font-family: inherit; }
 .ab { font-size: 11px; font-weight: 800; padding: 4px 10px; border-radius: 999px; }
 .ab.city { background: var(--sage-soft, #E4F0E9); color: var(--grass-d); }
 .ab.parents { background: #FBE4E0; color: var(--tomato-d); }
+
+.log-del { color: var(--ink-3); width: 30px; height: 30px; border-radius: 999px; display: grid; place-items: center; flex-shrink: 0; }
+.log-del:hover { background: var(--tomato); color: #fff; }
