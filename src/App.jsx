@@ -5,11 +5,8 @@ import {
   UtensilsCrossed, Bus, Palette, PartyPopper, BookOpen, Package,
   Coins, Baby, Percent, Download, Shield, Mail, ChevronLeft,
 } from 'lucide-react'
+import { supa } from './supa'
 
-const DB = {
-  get(k, f) { try { const v = localStorage.getItem('gr_' + k); return v ? JSON.parse(v) : f } catch { return f } },
-  set(k, v) { localStorage.setItem('gr_' + k, JSON.stringify(v)) },
-}
 const uid = () => Math.random().toString(36).slice(2, 10)
 const nis = n => '₪' + Math.round(Number(n || 0)).toLocaleString('he-IL')
 const nis1 = n => '₪' + (Number(n || 0)).toLocaleString('he-IL', { maximumFractionDigits: 1 })
@@ -35,28 +32,32 @@ function useToasts() {
   return [push, node]
 }
 
-function AuthScreen({ onAuth, toast }) {
+function AuthScreen({ toast }) {
   const [mode, setMode] = useState('login')
   const [form, setForm] = useState({ email: '', password: '', fullName: '', gardenName: '', phone: '' })
   const [errors, setErrors] = useState({})
+  const [busy, setBusy] = useState(false)
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
-  const submit = () => {
+  const submit = async () => {
     const e = {}
     if (!form.email) e.email = 'צריך אימייל'; else if (!form.email.includes('@')) e.email = 'אימייל לא תקין'
     if (!form.password) e.password = 'צריך סיסמה'; else if (mode === 'register' && form.password.length < 6) e.password = 'לפחות 6 תווים'
     if (mode === 'register') { if (!form.fullName) e.fullName = 'צריך שם'; if (!form.gardenName) e.gardenName = 'צריך שם גן' }
     setErrors(e); if (Object.keys(e).length) return
-    const users = DB.get('users', {})
-    if (mode === 'register') {
-      if (users[form.email]) { setErrors({ email: 'האימייל כבר רשום' }); return }
-      const isOwner = form.email.trim().toLowerCase() === 'lulik231@gmail.com'
-      users[form.email] = { email: form.email, password: form.password, fullName: form.fullName, gardenName: form.gardenName, phone: form.phone, isAdmin: isOwner, createdAt: Date.now() }
-      DB.set('users', users); toast('נרשמת בהצלחה!', 'good'); onAuth(users[form.email])
-    } else {
-      const u = users[form.email]
-      if (!u || u.password !== form.password) { setErrors({ password: 'אימייל או סיסמה שגויים' }); return }
-      onAuth(u)
-    }
+    setBusy(true)
+    try {
+      if (mode === 'register') {
+        const { error } = await supa.auth.signUp({
+          email: form.email.trim(), password: form.password,
+          options: { data: { full_name: form.fullName, garden_name: form.gardenName, phone: form.phone } },
+        })
+        if (error) { setErrors({ email: error.message.includes('registered') ? 'האימייל כבר רשום' : error.message }); setBusy(false); return }
+        toast('נרשמת בהצלחה!', 'good')
+      } else {
+        const { error } = await supa.auth.signInWithPassword({ email: form.email.trim(), password: form.password })
+        if (error) { setErrors({ password: 'אימייל או סיסמה שגויים' }); setBusy(false); return }
+      }
+    } catch (err) { toast('שגיאת התחברות', 'bad'); setBusy(false) }
   }
   return (
     <div className="login-page">
@@ -71,7 +72,7 @@ function AuthScreen({ onAuth, toast }) {
             <div className="field"><label>שם מלא <span className="req">*</span></label><input className={'control' + (errors.fullName ? ' err' : '')} value={form.fullName} onChange={e => set('fullName', e.target.value)} placeholder="דנה כהן" />{errors.fullName && <div className="err-text">{errors.fullName}</div>}</div>
             <div className="field"><label>שם הגן <span className="req">*</span></label><input className={'control' + (errors.gardenName ? ' err' : '')} value={form.gardenName} onChange={e => set('gardenName', e.target.value)} placeholder="גן היהלום" />{errors.gardenName && <div className="err-text">{errors.gardenName}</div>}</div>
           </>}
-          <button className="btn btn-primary btn-block" onClick={submit} style={{ marginTop: 6 }}>{mode === 'login' ? 'כניסה' : 'פתיחת חשבון'}</button>
+          <button className="btn btn-primary btn-block" onClick={submit} disabled={busy} style={{ marginTop: 6 }}>{busy ? 'רגע…' : (mode === 'login' ? 'כניסה' : 'פתיחת חשבון')}</button>
           <div className="swap-line">{mode === 'login' ? <>עדיין אין חשבון? <button onClick={() => { setMode('register'); setErrors({}) }}>הרשמה</button></> : <>כבר יש חשבון? <button onClick={() => { setMode('login'); setErrors({}) }}>כניסה</button></>}</div>
         </div>
         <div className="foot-note">הנתונים נשמרים במכשיר שלך</div>
@@ -387,9 +388,11 @@ function BudgetPanel({ budget, receipts, onAddPulse, onAddReceipt, onEdit, onDel
 }
 
 function AdminPanel({ onClose }) {
-  const users = DB.get('users', {})
-  const list = Object.values(users)
-  const stats = { total: list.length, admins: list.filter(u => u.isAdmin).length }
+  const [list, setList] = useState(null)
+  useEffect(() => {
+    supa.from('profiles').select('*').order('created_at', { ascending: true }).then(({ data }) => setList(data || []))
+  }, [])
+  const stats = { total: list?.length || 0, admins: list?.filter(u => u.is_admin).length || 0 }
   return (
     <div className="overlay" onClick={onClose}>
       <div className="modal modal-wide" onClick={e => e.stopPropagation()}>
@@ -399,43 +402,60 @@ function AdminPanel({ onClose }) {
             <div className="astat"><span className="astat-n">{stats.total}</span><span className="astat-l">משתמשות</span></div>
             <div className="astat"><span className="astat-n">{stats.admins}</span><span className="astat-l">מנהלות</span></div>
           </div>
-          <div className="admin-list">
-            {list.map(u => {
-              const data = DB.get('data2_' + u.email, { budgets: {} })
-              const hasCity = !!data.budgets?.city, hasParents = !!data.budgets?.parents
-              return (
-                <div className="admin-row" key={u.email}>
-                  <div className="admin-av">{(u.fullName || u.email)[0]}</div>
+          {list === null ? <div className="foot-note">טוען…</div> : (
+            <div className="admin-list">
+              {list.map(u => (
+                <div className="admin-row" key={u.id}>
+                  <div className="admin-av">{(u.full_name || u.email)[0]}</div>
                   <div className="admin-main">
-                    <div className="admin-name">{u.fullName} {u.isAdmin && <span className="admin-tag"><Shield size={11} /> אדמין</span>}</div>
-                    <div className="admin-meta"><Mail size={12} /> {u.email} · {u.gardenName}</div>
-                  </div>
-                  <div className="admin-badges">
-                    {hasCity && <span className="ab city">עירייה</span>}
-                    {hasParents && <span className="ab parents">הורים</span>}
+                    <div className="admin-name">{u.full_name} {u.is_admin && <span className="admin-tag"><Shield size={11} /> אדמין</span>}</div>
+                    <div className="admin-meta"><Mail size={12} /> {u.email} · {u.garden_name}</div>
                   </div>
                 </div>
-              )
-            })}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>
   )
 }
 
-function Dashboard({ user, onLogout, toast }) {
-  const key = 'data2_' + user.email
-  const saved = DB.get(key, { budgets: {}, receipts: {} })
-  const [budgets, setBudgets] = useState(saved.budgets)
-  const [receipts, setReceipts] = useState(saved.receipts)
+function Dashboard({ profile, onLogout, toast }) {
+  const [budgets, setBudgets] = useState({})
+  const [receipts, setReceipts] = useState({ city: [], parents: [] })
   const [tab, setTab] = useState('city')
   const [setupFor, setSetupFor] = useState(null)
   const [showAdmin, setShowAdmin] = useState(false)
-  useEffect(() => { DB.set(key, { budgets, receipts }) }, [budgets, receipts])
+  const [loaded, setLoaded] = useState(false)
+
+  // load from cloud
+  useEffect(() => {
+    (async () => {
+      const { data: b } = await supa.from('budgets').select('city, parents').eq('user_id', profile.id).single()
+      if (b) setBudgets({ ...(b.city ? { city: b.city } : {}), ...(b.parents ? { parents: b.parents } : {}) })
+      const { data: r } = await supa.from('receipts').select('*').eq('user_id', profile.id).order('created_at', { ascending: false })
+      if (r) {
+        const grouped = { city: [], parents: [] }
+        r.forEach(row => grouped[row.budget_type].push({ id: row.id, amount: Number(row.amount), store: row.store, date: row.receipt_date, catId: row.cat_id, img: row.img }))
+        setReceipts(grouped)
+      }
+      setLoaded(true)
+    })()
+  }, [profile.id])
+
+  // save budgets to cloud (debounced) — only after initial load
+  useEffect(() => {
+    if (!loaded) return
+    const t = setTimeout(() => {
+      supa.from('budgets').upsert({ user_id: profile.id, city: budgets.city || null, parents: budgets.parents || null, updated_at: new Date().toISOString() }).then(() => {})
+    }, 500)
+    return () => clearTimeout(t)
+  }, [budgets, loaded])
+
   const doExport = async () => {
     if (!budgets.city && !budgets.parents) { toast('אין עדיין נתונים לייצוא', 'bad'); return }
-    try { await exportExcel(budgets, receipts, user.gardenName); toast('הקובץ הורד', 'good') }
+    try { await exportExcel(budgets, receipts, profile.garden_name); toast('הקובץ הורד', 'good') }
     catch { toast('שגיאה בייצוא', 'bad') }
   }
   const saveBudget = (type, data) => setBudgets(b => ({ ...b, [type]: { ...(b[type] || {}), ...data } }))
@@ -446,14 +466,23 @@ function Dashboard({ user, onLogout, toast }) {
     if (type === 'parents') nb.cats = bd.cats.map(c => ({ ...c, allocated: Math.max(c.spent, c.allocated - p.amount * (c.pct / 100)) }))
     return { ...b, [type]: nb }
   })
-  const addReceipt = (type, r) => { setReceipts(rs => ({ ...rs, [type]: [r, ...(rs[type] || [])] })); setBudgets(b => { const bd = b[type]; const nb = { ...bd, spent: (bd.spent || 0) + r.amount }; if (type === 'parents' && r.catId) nb.cats = bd.cats.map(c => c.id === r.catId ? { ...c, spent: c.spent + r.amount } : c); return { ...b, [type]: nb } }) }
-  const delReceipt = (type, id) => { const r = (receipts[type] || []).find(x => x.id === id); if (!r) return; setReceipts(rs => ({ ...rs, [type]: rs[type].filter(x => x.id !== id) })); setBudgets(b => { const bd = b[type]; const nb = { ...bd, spent: Math.max(0, (bd.spent || 0) - r.amount) }; if (type === 'parents' && r.catId) nb.cats = bd.cats.map(c => c.id === r.catId ? { ...c, spent: Math.max(0, c.spent - r.amount) } : c); return { ...b, [type]: nb } }) }
+  const addReceipt = async (type, r) => {
+    setReceipts(rs => ({ ...rs, [type]: [r, ...(rs[type] || [])] }))
+    setBudgets(b => { const bd = b[type]; const nb = { ...bd, spent: (bd.spent || 0) + r.amount }; if (type === 'parents' && r.catId) nb.cats = bd.cats.map(c => c.id === r.catId ? { ...c, spent: c.spent + r.amount } : c); return { ...b, [type]: nb } })
+    await supa.from('receipts').insert({ id: r.id, user_id: profile.id, budget_type: type, cat_id: r.catId, amount: r.amount, store: r.store, receipt_date: r.date, img: r.img })
+  }
+  const delReceipt = async (type, id) => {
+    const r = (receipts[type] || []).find(x => x.id === id); if (!r) return
+    setReceipts(rs => ({ ...rs, [type]: rs[type].filter(x => x.id !== id) }))
+    setBudgets(b => { const bd = b[type]; const nb = { ...bd, spent: Math.max(0, (bd.spent || 0) - r.amount) }; if (type === 'parents' && r.catId) nb.cats = bd.cats.map(c => c.id === r.catId ? { ...c, spent: Math.max(0, c.spent - r.amount) } : c); return { ...b, [type]: nb } })
+    await supa.from('receipts').delete().eq('id', id)
+  }
   const current = budgets[tab]
   return (
     <div className="app-shell">
       <header className="topbar"><div className="topbar-inner">
-        <div className="brand"><div className="brand-mark"><Wallet size={24} strokeWidth={2.4} /></div><div><div className="brand-name">גן־ריפורט</div><div className="brand-sub">{user.gardenName}</div></div></div>
-        <div className="who"><span className="badge-year"><Calendar size={14} /> {academicYear()}</span>{user.isAdmin && <button className="badge-admin clickable" onClick={() => setShowAdmin(true)}><Sparkles size={13} /> ניהול מערכת</button>}<button className="btn-export" onClick={doExport}><Download size={16} /> אקסל</button><span className="who-name">{user.fullName}</span><button className="btn-ghost" onClick={onLogout}><LogOut size={16} /></button></div>
+        <div className="brand"><div className="brand-mark"><Wallet size={24} strokeWidth={2.4} /></div><div><div className="brand-name">גן־ריפורט</div><div className="brand-sub">{profile.garden_name}</div></div></div>
+        <div className="who"><span className="badge-year"><Calendar size={14} /> {academicYear()}</span>{profile.is_admin && <button className="badge-admin clickable" onClick={() => setShowAdmin(true)}><Sparkles size={13} /> ניהול מערכת</button>}<button className="btn-export" onClick={doExport}><Download size={16} /> אקסל</button><span className="who-name">{profile.full_name}</span><button className="btn-ghost" onClick={onLogout}><LogOut size={16} /></button></div>
       </div></header>
       <div className="tabs-bar"><div className="tabs-inner">
         <button className={'tab' + (tab === 'city' ? ' on' : '')} onClick={() => setTab('city')}><div className="tab-ic"><Building2 size={22} /></div><div className="tab-txt"><div className="tab-name">קצבת עירייה</div><div className="tab-sub">{budgets.city ? nis(budgets.city.received || 0) + ' נכנס' : 'לא הוגדר'}</div></div></button>
@@ -475,8 +504,30 @@ function Dashboard({ user, onLogout, toast }) {
 
 export default function App() {
   const [toast, toastNode] = useToasts()
-  const [user, setUser] = useState(() => DB.get('session', null))
-  const onAuth = u => { DB.set('session', u); setUser(u) }
-  const onLogout = () => { DB.set('session', null); setUser(null) }
-  return (<>{!user ? <AuthScreen onAuth={onAuth} toast={toast} /> : <Dashboard user={user} onLogout={onLogout} toast={toast} />}{toastNode}</>)
+  const [session, setSession] = useState(null)
+  const [profile, setProfile] = useState(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    supa.auth.getSession().then(({ data }) => { setSession(data.session); if (!data.session) setLoading(false) })
+    const { data: sub } = supa.auth.onAuthStateChange((_e, s) => { setSession(s); if (!s) { setProfile(null); setLoading(false) } })
+    return () => sub.subscription.unsubscribe()
+  }, [])
+
+  useEffect(() => {
+    if (!session) return
+    let tries = 0
+    const load = async () => {
+      const { data } = await supa.from('profiles').select('*').eq('id', session.user.id).single()
+      if (data) { setProfile(data); setLoading(false) }
+      else if (tries++ < 5) setTimeout(load, 600) // profile trigger may lag a moment after signup
+      else setLoading(false)
+    }
+    load()
+  }, [session])
+
+  const onLogout = async () => { await supa.auth.signOut() }
+
+  if (loading && session) return <div className="login-page"><div className="foot-note">טוען…</div></div>
+  return (<>{!session || !profile ? <AuthScreen toast={toast} /> : <Dashboard profile={profile} onLogout={onLogout} toast={toast} />}{toastNode}</>)
 }
