@@ -371,3 +371,8 @@ input, select { font-family: inherit; }
 
 .log-del { color: var(--ink-3); width: 30px; height: 30px; border-radius: 999px; display: grid; place-items: center; flex-shrink: 0; }
 .log-del:hover { background: var(--tomato); color: #fff; }
+
+.or-line { display: flex; align-items: center; gap: 12px; margin: 14px 0 10px; color: var(--ink-3); font-size: 13px; }
+.or-line::before, .or-line::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+.btn-google { background: #fff; color: var(--ink); border: 1.5px solid var(--line); display: flex; align-items: center; justify-content: center; gap: 10px; font-weight: 600; }
+.btn-google:hover { background: #f7f7f7; border-color: var(--ink-3); }

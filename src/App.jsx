@@ -59,6 +59,11 @@ function AuthScreen({ toast }) {
       }
     } catch (err) { toast('שגיאת התחברות', 'bad'); setBusy(false) }
   }
+  const googleLogin = async () => {
+    setBusy(true)
+    const { error } = await supa.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: window.location.origin } })
+    if (error) { toast('התחברות עם Google לא זמינה כרגע', 'bad'); setBusy(false) }
+  }
   return (
     <div className="login-page">
       <div className="login-box">
@@ -73,6 +78,11 @@ function AuthScreen({ toast }) {
             <div className="field"><label>שם הגן <span className="req">*</span></label><input className={'control' + (errors.gardenName ? ' err' : '')} value={form.gardenName} onChange={e => set('gardenName', e.target.value)} placeholder="גן היהלום" />{errors.gardenName && <div className="err-text">{errors.gardenName}</div>}</div>
           </>}
           <button className="btn btn-primary btn-block" onClick={submit} disabled={busy} style={{ marginTop: 6 }}>{busy ? 'רגע…' : (mode === 'login' ? 'כניסה' : 'פתיחת חשבון')}</button>
+          <div className="or-line"><span>או</span></div>
+          <button className="btn btn-google btn-block" onClick={googleLogin} disabled={busy}>
+            <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.1H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3l5.7-5.7C34.2 6.1 29.3 4 24 4 13 4 4 13 4 24s9 20 20 20 20-9 20-20c0-1.3-.1-2.6-.4-3.9z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.9 1.2 8 3l5.7-5.7C34.2 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.1H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C41.4 34.9 44 30 44 24c0-1.3-.1-2.6-.4-3.9z"/></svg>
+            המשך עם Google
+          </button>
           <div className="swap-line">{mode === 'login' ? <>עדיין אין חשבון? <button onClick={() => { setMode('register'); setErrors({}) }}>הרשמה</button></> : <>כבר יש חשבון? <button onClick={() => { setMode('login'); setErrors({}) }}>כניסה</button></>}</div>
         </div>
         <div className="foot-note">הנתונים נשמרים במכשיר שלך</div>
@@ -502,6 +512,36 @@ function Dashboard({ profile, onLogout, toast }) {
   )
 }
 
+function CompleteProfile({ session, onDone, toast }) {
+  const [gardenName, setGardenName] = useState('')
+  const [phone, setPhone] = useState('')
+  const [busy, setBusy] = useState(false)
+  const save = async () => {
+    if (!gardenName.trim()) { toast('צריך שם גן', 'bad'); return }
+    setBusy(true)
+    const { data, error } = await supa.from('profiles')
+      .update({ garden_name: gardenName.trim(), phone: phone.trim() || null })
+      .eq('id', session.user.id).select().single()
+    if (error) { toast('שגיאה בשמירה, נסי שוב', 'bad'); setBusy(false); return }
+    toast('ברוכה הבאה!', 'good')
+    onDone(data)
+  }
+  return (
+    <div className="login-page">
+      <div className="login-box">
+        <div className="login-hero"><div className="mark"><Wallet size={34} strokeWidth={2.4} /></div><h1>גן־ריפורט</h1><p>עוד פרט אחד קטן ומתחילים</p></div>
+        <div className="login-card">
+          <h3>כמעט סיימנו</h3>
+          <p className="subt">נכנסת עם Google — נשאר רק להשלים את פרטי הגן</p>
+          <div className="field"><label>שם הגן <span className="req">*</span></label><input className="control" value={gardenName} onChange={e => setGardenName(e.target.value)} placeholder="גן היהלום" /></div>
+          <div className="field"><label>טלפון</label><input className="control" value={phone} onChange={e => setPhone(e.target.value)} placeholder="050-0000000" type="tel" /></div>
+          <button className="btn btn-primary btn-block" onClick={save} disabled={busy} style={{ marginTop: 6 }}>{busy ? 'רגע…' : 'סיום והתחלה'}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function App() {
   const [toast, toastNode] = useToasts()
   const [session, setSession] = useState(null)
@@ -529,5 +569,5 @@ export default function App() {
   const onLogout = async () => { await supa.auth.signOut() }
 
   if (loading && session) return <div className="login-page"><div className="foot-note">טוען…</div></div>
-  return (<>{!session || !profile ? <AuthScreen toast={toast} /> : <Dashboard profile={profile} onLogout={onLogout} toast={toast} />}{toastNode}</>)
+  return (<>{!session || !profile ? <AuthScreen toast={toast} /> : !profile.garden_name ? <CompleteProfile session={session} toast={toast} onDone={setProfile} /> : <Dashboard profile={profile} onLogout={onLogout} toast={toast} />}{toastNode}</>)
 }
