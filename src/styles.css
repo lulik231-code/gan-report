@@ -376,3 +376,29 @@ input, select { font-family: inherit; }
 .or-line::before, .or-line::after { content: ''; flex: 1; height: 1px; background: var(--line); }
 .btn-google { background: #fff; color: var(--ink); border: 1.5px solid var(--line); display: flex; align-items: center; justify-content: center; gap: 10px; font-weight: 600; }
 .btn-google:hover { background: #f7f7f7; border-color: var(--ink-3); }
+
+/* ===== user management, trial & subscription ===== */
+.badge-trial, .badge-paid { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 700; padding: 6px 11px; border-radius: 999px; white-space: nowrap; }
+.badge-trial { background: #eef4ff; color: #2d5fd0; }
+.badge-paid { background: #e9f8ef; color: #1d8a4e; }
+.chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; font-weight: 700; padding: 3px 9px; border-radius: 999px; vertical-align: middle; margin-inline-start: 6px; }
+.chip-red { background: #fdeaea; color: #c23b3b; }
+.chip-green { background: #e9f8ef; color: #1d8a4e; }
+.chip-blue { background: #eef4ff; color: #2d5fd0; }
+.chip-gray { background: #f0f0ee; color: #7a7a72; }
+.chip-purple { background: #f3edfd; color: #7a4fd0; }
+.chip-amber { background: #fdf3e2; color: #b57a12; }
+.astat-amber { color: #b57a12; }
+.admin-row.is-blocked { opacity: .6; }
+.admin-actions { display: flex; gap: 8px; margin-top: 9px; flex-wrap: wrap; }
+.abtn { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 700; padding: 7px 12px; border-radius: 9px; background: #f4f4f2; color: var(--ink); border: 1px solid var(--line); cursor: pointer; transition: filter .12s; }
+.abtn:hover { filter: brightness(.96); }
+.abtn-green { background: #e9f8ef; color: #1d8a4e; border-color: #cdeeda; }
+.abtn-red { background: #fdeaea; color: #c23b3b; border-color: #f6d4d4; }
+.gate-done { text-align: center; padding: 14px 6px 6px; color: var(--ink); }
+.gate-done svg { color: var(--ink-3); margin-bottom: 8px; }
+.gate-done h3 { margin: 4px 0 6px; }
+.gate-out { margin: 14px auto 0; display: flex; align-items: center; gap: 6px; }
+.sub-card { border: 2px solid var(--line); border-radius: 14px; padding: 16px; margin: 14px 0; background: #fbfbf9; }
+.sub-name { display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 16px; margin-bottom: 10px; }
+.sub-feats { margin: 0; padding-inline-start: 18px; display: grid; gap: 6px; font-size: 14px; color: var(--ink-2, var(--ink)); }

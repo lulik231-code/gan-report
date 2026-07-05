@@ -4,6 +4,7 @@ import {
   FileSpreadsheet, PencilLine, LogOut, Calendar, Sparkles, Receipt,
   UtensilsCrossed, Bus, Palette, PartyPopper, BookOpen, Package,
   Coins, Baby, Percent, Download, Shield, Mail, ChevronLeft,
+  Clock, CreditCard, Ban, CheckCircle2,
 } from 'lucide-react'
 import { supa } from './supa'
 
@@ -21,6 +22,17 @@ const guessIcon = t => {
   if (/סיום|מסיב|חג|אירוע/.test(t)) return 'party'
   if (/ספר|יצירה|צעצוע|ציוד|לימוד/.test(t)) return 'book'
   return 'other'
+}
+
+// Access state: blocked > admin > paid > trial > expired
+const accessOf = p => {
+  if (!p) return null
+  if (p.status === 'blocked') return { state: 'blocked' }
+  if (p.is_admin) return { state: 'admin' }
+  const now = Date.now()
+  if (p.paid_until && now < new Date(p.paid_until).getTime()) return { state: 'paid', until: p.paid_until }
+  if (p.trial_ends_at && now < new Date(p.trial_ends_at).getTime()) return { state: 'trial', daysLeft: Math.max(1, Math.ceil((new Date(p.trial_ends_at).getTime() - now) / 86400000)) }
+  return { state: 'expired' }
 }
 function CatIcon({ name, size = 18, ...p }) { const I = CAT_ICONS[name] || Package; return <I size={size} {...p} /> }
 
@@ -397,12 +409,52 @@ function BudgetPanel({ budget, receipts, onAddPulse, onAddReceipt, onEdit, onDel
   )
 }
 
-function AdminPanel({ onClose }) {
+function AdminPanel({ onClose, toast }) {
   const [list, setList] = useState(null)
+  const [reqs, setReqs] = useState([])
   useEffect(() => {
-    supa.from('profiles').select('*').order('created_at', { ascending: true }).then(({ data }) => setList(data || []))
+    (async () => {
+      const { data } = await supa.from('profiles').select('*').order('created_at', { ascending: true })
+      setList(data || [])
+      const { data: rq } = await supa.from('subscription_requests').select('*').eq('status', 'pending')
+      setReqs(rq || [])
+    })()
   }, [])
-  const stats = { total: list?.length || 0, admins: list?.filter(u => u.is_admin).length || 0 }
+  const patch = async (id, fields, msg) => {
+    const { error } = await supa.from('profiles').update(fields).eq('id', id)
+    if (error) { toast('הפעולה נכשלה', 'bad'); return false }
+    setList(l => l.map(u => u.id === id ? { ...u, ...fields } : u))
+    if (msg) toast(msg, 'good')
+    return true
+  }
+  const extendTrial = u => {
+    const base = Math.max(Date.now(), new Date(u.trial_ends_at || 0).getTime())
+    patch(u.id, { trial_ends_at: new Date(base + 30 * 86400000).toISOString(), plan: 'trial' }, 'תקופת הניסיון הוארכה ב־30 יום')
+  }
+  const activateSub = async u => {
+    const base = new Date(Math.max(Date.now(), u.paid_until ? new Date(u.paid_until).getTime() : 0))
+    base.setMonth(base.getMonth() + 1)
+    const ok = await patch(u.id, { plan: 'paid', paid_until: base.toISOString(), status: 'active' }, 'המנוי הופעל לחודש')
+    if (ok) {
+      await supa.from('subscription_requests').update({ status: 'handled' }).eq('user_id', u.id).eq('status', 'pending')
+      setReqs(r => r.filter(x => x.user_id !== u.id))
+    }
+  }
+  const toggleBlock = u => patch(u.id, { status: u.status === 'blocked' ? 'active' : 'blocked' }, u.status === 'blocked' ? 'הגישה שוחזרה' : 'הגישה הושהתה')
+  const chip = u => {
+    if (u.status === 'blocked') return <span className="chip chip-red"><Ban size={11} /> חסומה</span>
+    if (u.is_admin) return <span className="chip chip-purple"><Shield size={11} /> אדמין</span>
+    if (u.paid_until && new Date(u.paid_until) > new Date()) return <span className="chip chip-green"><CheckCircle2 size={11} /> מנוי עד {heDate(u.paid_until)}</span>
+    if (u.trial_ends_at && new Date(u.trial_ends_at) > new Date()) return <span className="chip chip-blue"><Clock size={11} /> ניסיון עד {heDate(u.trial_ends_at)}</span>
+    return <span className="chip chip-gray"><Clock size={11} /> פג תוקף</span>
+  }
+  const now = new Date()
+  const stats = {
+    total: list?.length || 0,
+    paid: list?.filter(u => u.paid_until && new Date(u.paid_until) > now).length || 0,
+    blocked: list?.filter(u => u.status === 'blocked').length || 0,
+    pending: reqs.length,
+  }
   return (
     <div className="overlay" onClick={onClose}>
       <div className="modal modal-wide" onClick={e => e.stopPropagation()}>
@@ -410,16 +462,25 @@ function AdminPanel({ onClose }) {
         <div className="modal-body">
           <div className="admin-stats">
             <div className="astat"><span className="astat-n">{stats.total}</span><span className="astat-l">משתמשות</span></div>
-            <div className="astat"><span className="astat-n">{stats.admins}</span><span className="astat-l">מנהלות</span></div>
+            <div className="astat"><span className="astat-n">{stats.paid}</span><span className="astat-l">מנויות</span></div>
+            <div className="astat"><span className="astat-n">{stats.blocked}</span><span className="astat-l">חסומות</span></div>
+            <div className="astat"><span className="astat-n astat-amber">{stats.pending}</span><span className="astat-l">בקשות מנוי</span></div>
           </div>
           {list === null ? <div className="foot-note">טוען…</div> : (
             <div className="admin-list">
               {list.map(u => (
-                <div className="admin-row" key={u.id}>
-                  <div className="admin-av">{(u.full_name || u.email)[0]}</div>
+                <div className={'admin-row' + (u.status === 'blocked' ? ' is-blocked' : '')} key={u.id}>
+                  <div className="admin-av">{(u.full_name || u.email || '?')[0]}</div>
                   <div className="admin-main">
-                    <div className="admin-name">{u.full_name} {u.is_admin && <span className="admin-tag"><Shield size={11} /> אדמין</span>}</div>
-                    <div className="admin-meta"><Mail size={12} /> {u.email} · {u.garden_name}</div>
+                    <div className="admin-name">{u.full_name || '—'} {chip(u)} {reqs.some(r => r.user_id === u.id) && <span className="chip chip-amber"><CreditCard size={11} /> ביקשה מנוי</span>}</div>
+                    <div className="admin-meta"><Mail size={12} /> {u.email} {u.garden_name ? '· ' + u.garden_name : ''}</div>
+                    {!u.is_admin && (
+                      <div className="admin-actions">
+                        <button className="abtn" onClick={() => extendTrial(u)}><Clock size={13} /> +30 ימי ניסיון</button>
+                        <button className="abtn abtn-green" onClick={() => activateSub(u)}><CreditCard size={13} /> הפעלת מנוי לחודש</button>
+                        <button className={'abtn ' + (u.status === 'blocked' ? 'abtn-green' : 'abtn-red')} onClick={() => toggleBlock(u)}><Ban size={13} /> {u.status === 'blocked' ? 'שחרור חסימה' : 'חסימה'}</button>
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
@@ -431,7 +492,7 @@ function AdminPanel({ onClose }) {
   )
 }
 
-function Dashboard({ profile, onLogout, toast }) {
+function Dashboard({ profile, access, onLogout, toast }) {
   const [budgets, setBudgets] = useState({})
   const [receipts, setReceipts] = useState({ city: [], parents: [] })
   const [tab, setTab] = useState('city')
@@ -492,7 +553,7 @@ function Dashboard({ profile, onLogout, toast }) {
     <div className="app-shell">
       <header className="topbar"><div className="topbar-inner">
         <div className="brand"><div className="brand-mark"><Wallet size={24} strokeWidth={2.4} /></div><div><div className="brand-name">גן־ריפורט</div><div className="brand-sub">{profile.garden_name}</div></div></div>
-        <div className="who"><span className="badge-year"><Calendar size={14} /> {academicYear()}</span>{profile.is_admin && <button className="badge-admin clickable" onClick={() => setShowAdmin(true)}><Sparkles size={13} /> ניהול מערכת</button>}<button className="btn-export" onClick={doExport}><Download size={16} /> אקסל</button><span className="who-name">{profile.full_name}</span><button className="btn-ghost" onClick={onLogout}><LogOut size={16} /></button></div>
+        <div className="who"><span className="badge-year"><Calendar size={14} /> {academicYear()}</span>{access?.state === 'trial' && <span className="badge-trial"><Clock size={13} /> ניסיון · {access.daysLeft} ימים</span>}{access?.state === 'paid' && <span className="badge-paid"><CheckCircle2 size={13} /> מנוי עד {heDate(access.until)}</span>}{profile.is_admin && <button className="badge-admin clickable" onClick={() => setShowAdmin(true)}><Sparkles size={13} /> ניהול מערכת</button>}<button className="btn-export" onClick={doExport}><Download size={16} /> אקסל</button><span className="who-name">{profile.full_name}</span><button className="btn-ghost" onClick={onLogout}><LogOut size={16} /></button></div>
       </div></header>
       <div className="tabs-bar"><div className="tabs-inner">
         <button className={'tab' + (tab === 'city' ? ' on' : '')} onClick={() => setTab('city')}><div className="tab-ic"><Building2 size={22} /></div><div className="tab-txt"><div className="tab-name">קצבת עירייה</div><div className="tab-sub">{budgets.city ? nis(budgets.city.received || 0) + ' נכנס' : 'לא הוגדר'}</div></div></button>
@@ -507,7 +568,7 @@ function Dashboard({ profile, onLogout, toast }) {
       </main>
       {setupFor === 'city' && <CitySetup existing={budgets.city} onClose={() => setSetupFor(null)} onSave={(d) => saveBudget('city', d)} toast={toast} />}
       {setupFor === 'parents' && <ParentsSetup existing={budgets.parents} onClose={() => setSetupFor(null)} onSave={(d) => saveBudget('parents', d)} toast={toast} />}
-      {showAdmin && <AdminPanel onClose={() => setShowAdmin(false)} />}
+      {showAdmin && <AdminPanel onClose={() => setShowAdmin(false)} toast={toast} />}
     </div>
   )
 }
@@ -542,6 +603,55 @@ function CompleteProfile({ session, onDone, toast }) {
   )
 }
 
+function BlockedScreen({ onLogout }) {
+  return (
+    <div className="login-page"><div className="login-box">
+      <div className="login-hero"><div className="mark"><Wallet size={34} strokeWidth={2.4} /></div><h1>גן־ריפורט</h1></div>
+      <div className="login-card">
+        <div className="gate-done"><Ban size={40} /><h3>החשבון הושהה</h3><p className="subt">הגישה למערכת הושהתה על ידי מנהלת המערכת. אם נראה לך שמדובר בטעות — פני אליה ישירות.</p></div>
+        <button className="btn-ghost gate-out" onClick={onLogout}><LogOut size={15} /> יציאה</button>
+      </div>
+    </div></div>
+  )
+}
+
+function SubscribeScreen({ profile, onLogout, toast }) {
+  const [sent, setSent] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const request = async () => {
+    setBusy(true)
+    // TODO: חיבור מערכת סליקה — כשתחובר, הכפתור יוביל לעמוד תשלום במקום לשלוח בקשה ידנית
+    const { error } = await supa.from('subscription_requests').insert({ user_id: profile.id })
+    setBusy(false)
+    if (error) { toast('שליחת הבקשה נכשלה, נסי שוב', 'bad'); return }
+    setSent(true)
+  }
+  return (
+    <div className="login-page"><div className="login-box">
+      <div className="login-hero"><div className="mark"><Wallet size={34} strokeWidth={2.4} /></div><h1>גן־ריפורט</h1><p>שלום {profile.full_name}</p></div>
+      <div className="login-card">
+        {sent ? (
+          <div className="gate-done"><CheckCircle2 size={40} /><h3>הבקשה התקבלה!</h3><p className="subt">מנהלת המערכת תיצור איתך קשר להסדרת התשלום, והמנוי יופעל מיד לאחר מכן. הנתונים שלך שמורים ומחכים לך.</p></div>
+        ) : (<>
+          <h3>תקופת הניסיון הסתיימה</h3>
+          <p className="subt">הנתונים שלך שמורים בענן. כדי להמשיך לנהל את כספי הגן, הצטרפי למנוי:</p>
+          <div className="sub-card">
+            <div className="sub-name"><CreditCard size={18} /> מנוי גן־ריפורט</div>
+            <ul className="sub-feats">
+              <li>מעקב קצבת עירייה ותשלומי הורים</li>
+              <li>סריקת קבלות וייצוא לאקסל</li>
+              <li>גיבוי בענן וסנכרון בין מכשירים</li>
+            </ul>
+          </div>
+          <button className="btn btn-primary btn-block" onClick={request} disabled={busy}>{busy ? 'רגע…' : 'אני רוצה להצטרף למנוי'}</button>
+          <p className="foot-note" style={{ textAlign: 'center', marginTop: 8 }}>בקרוב: תשלום מקוון ישירות מכאן</p>
+        </>)}
+        <button className="btn-ghost gate-out" onClick={onLogout}><LogOut size={15} /> יציאה</button>
+      </div>
+    </div></div>
+  )
+}
+
 export default function App() {
   const [toast, toastNode] = useToasts()
   const [session, setSession] = useState(null)
@@ -569,5 +679,6 @@ export default function App() {
   const onLogout = async () => { await supa.auth.signOut() }
 
   if (loading && session) return <div className="login-page"><div className="foot-note">טוען…</div></div>
-  return (<>{!session || !profile ? <AuthScreen toast={toast} /> : !profile.garden_name ? <CompleteProfile session={session} toast={toast} onDone={setProfile} /> : <Dashboard profile={profile} onLogout={onLogout} toast={toast} />}{toastNode}</>)
+  const access = accessOf(profile)
+  return (<>{!session || !profile ? <AuthScreen toast={toast} /> : access.state === 'blocked' ? <BlockedScreen onLogout={onLogout} /> : !profile.garden_name ? <CompleteProfile session={session} toast={toast} onDone={setProfile} /> : access.state === 'expired' ? <SubscribeScreen profile={profile} onLogout={onLogout} toast={toast} /> : <Dashboard profile={profile} access={access} onLogout={onLogout} toast={toast} />}{toastNode}</>)
 }
