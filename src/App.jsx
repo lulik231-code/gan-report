@@ -300,6 +300,22 @@ function PulseModal({ budget, onClose, onSave, toast }) {
   )
 }
 
+// דחיסת תמונה בצד הלקוח: מקטין ל‑1568px מקסימום וממיר ל‑JPEG — מונע חסימות גודל ומאיץ זיהוי
+function compressImage(dataUrl, maxDim = 1568, quality = 0.85) {
+  return new Promise(resolve => {
+    const img = new Image()
+    img.onload = () => {
+      let { width: w, height: h } = img
+      if (Math.max(w, h) > maxDim) { const s = maxDim / Math.max(w, h); w = Math.round(w * s); h = Math.round(h * s) }
+      const c = document.createElement('canvas'); c.width = w; c.height = h
+      c.getContext('2d').drawImage(img, 0, 0, w, h)
+      resolve(c.toDataURL('image/jpeg', quality))
+    }
+    img.onerror = () => resolve(dataUrl)
+    img.src = dataUrl
+  })
+}
+
 async function runOCR(base64, mediaType) {
   try {
     const res = await fetch('/.netlify/functions/ocr', {
@@ -318,9 +334,9 @@ function ReceiptModal({ budget, onClose, onSave, toast }) {
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
   const onFile = async e => {
     const file = e.target.files?.[0]; if (!file) return
-    if (file.size > 6 * 1024 * 1024) { toast('קובץ גדול מדי (עד 6MB)', 'bad'); return }
+    if (file.size > 20 * 1024 * 1024) { toast('קובץ גדול מדי (עד 20MB)', 'bad'); return }
     setBusy(true); const r = new FileReader()
-    r.onload = async ev => { const d = ev.target.result; setImg(d); const mt = d.slice(5, d.indexOf(';')); const o = await runOCR(d.split(',')[1], mt); if (o.error) toast(o.error === 'no_key' ? 'זיהוי אוטומטי לא מוגדר — חסר מפתח API' : 'הזיהוי האוטומטי נכשל, אפשר להקליד ידנית', 'bad'); setConf(o.confidence); setForm(f => ({ ...f, amount: o.amount ?? '', store: o.store ?? '', date: o.date ?? f.date })); setBusy(false) }
+    r.onload = async ev => { const d = await compressImage(ev.target.result); setImg(d); const o = await runOCR(d.split(',')[1], 'image/jpeg'); if (o.error) toast(o.error === 'no_key' ? 'זיהוי אוטומטי לא מוגדר — חסר מפתח API' : 'הזיהוי האוטומטי נכשל, אפשר להקליד ידנית', 'bad'); setConf(o.confidence); setForm(f => ({ ...f, amount: o.amount ?? '', store: o.store ?? '', date: o.date ?? f.date })); setBusy(false) }
     r.readAsDataURL(file)
   }
   const save = () => { if (!form.amount || parseFloat(form.amount) <= 0) { toast('צריך סכום', 'bad'); return } if (!isCity && !form.catId) { toast('צריך לבחור קטגוריה', 'bad'); return } onSave({ id: uid(), amount: parseFloat(form.amount), store: form.store || 'ללא שם', date: form.date, catId: isCity ? null : form.catId, img, createdAt: Date.now() }); toast('הקבלה נשמרה', 'good'); onClose() }
@@ -331,7 +347,7 @@ function ReceiptModal({ budget, onClose, onSave, toast }) {
         <div className="modal-head"><div><div className="eyebrow">{isCity ? 'קצבת עירייה' : 'כספי הורים'}</div><h3>צילום קבלה</h3></div><button className="modal-x" onClick={onClose}><X size={20} /></button></div>
         <div className="modal-body">
           {!img ? (
-            <label className="dropzone"><Camera size={40} strokeWidth={1.6} /><div className="dz-title">צילום או בחירת תמונה</div><div className="hint">JPG / PNG · עד 6MB</div><input type="file" accept="image/*" onChange={onFile} hidden /></label>
+            <label className="dropzone"><Camera size={40} strokeWidth={1.6} /><div className="dz-title">צילום או בחירת תמונה</div><div className="hint">כל תמונה מהמצלמה או מהגלריה</div><input type="file" accept="image/*" onChange={onFile} hidden /></label>
           ) : <>
             <img src={img} alt="קבלה" className="receipt-preview" />
             {busy && <div className="reading">קורא את הקבלה…</div>}
