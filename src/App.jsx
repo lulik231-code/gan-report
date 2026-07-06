@@ -104,63 +104,27 @@ function AuthScreen({ toast }) {
 }
 
 async function exportExcel(budgets, receipts, gardenName) {
-  const XLSX = await import('xlsx')
-  const wb = XLSX.utils.book_new()
-
-  // ---- City sheet ----
-  const city = budgets.city
-  const cityRows = []
-  cityRows.push([`קצבת עירייה — ${gardenName}`])
-  cityRows.push([])
-  cityRows.push(['פעימות הכנסה'])
-  cityRows.push(['#', 'סכום', 'תאריך', 'הערה'])
-  let cityIncome = 0
-  ;(city?.pulses || []).forEach((p, i) => { cityRows.push([i + 1, p.amount, heDate(p.date), p.note || '']); cityIncome += p.amount })
-  cityRows.push(['סה״כ הכנסות', cityIncome])
-  cityRows.push([])
-  cityRows.push(['הוצאות (קבלות)'])
-  cityRows.push(['ספק', 'סכום', 'תאריך', 'יתרה מתגלגלת'])
-  let cityBal = cityIncome, citySpent = 0
-  ;(receipts.city || []).slice().reverse().forEach(r => { cityBal -= r.amount; citySpent += r.amount; cityRows.push([r.store, r.amount, heDate(r.date), cityBal]) })
-  cityRows.push(['סה״כ הוצאות', citySpent])
-  cityRows.push(['יתרה בקופה', cityIncome - citySpent])
-  const wsCity = XLSX.utils.aoa_to_sheet(cityRows)
-  wsCity['!cols'] = [{ wch: 22 }, { wch: 12 }, { wch: 12 }, { wch: 16 }]
-  XLSX.utils.book_append_sheet(wb, wsCity, 'קצבת עירייה')
-
-  // ---- Parents sheet ----
-  const par = budgets.parents
-  const pRows = []
-  pRows.push([`תשלומי הורים — ${gardenName}`])
-  pRows.push([])
-  if (par) {
-    pRows.push(['תשלום שנתי להורה', par.perChild, 'מספר ילדים', par.numKids, 'הנחות/לא שולם', par.adjust || 0])
-    pRows.push(['צפי הכנסה כולל', par.expected])
-    pRows.push([])
-    pRows.push(['פעימות הכנסה'])
-    pRows.push(['#', 'סכום', 'תאריך', 'הערה'])
-    let pIncome = 0
-    ;(par.pulses || []).forEach((p, i) => { pRows.push([i + 1, p.amount, heDate(p.date), p.note || '']); pIncome += p.amount })
-    pRows.push(['סה״כ נכנס', pIncome])
-    pRows.push([])
-    pRows.push(['התפלגות לפי קטגוריה'])
-    pRows.push(['קטגוריה', 'אחוז', 'הוקצה', 'הוצא', 'זמין'])
-    ;(par.cats || []).forEach(c => pRows.push([c.name, Math.round(c.pct) + '%', c.allocated, c.spent, c.allocated - c.spent]))
-    pRows.push([])
-    pRows.push(['הוצאות (קבלות)'])
-    pRows.push(['ספק', 'קטגוריה', 'סכום', 'תאריך'])
-    ;(receipts.parents || []).slice().reverse().forEach(r => {
-      const c = par.cats.find(c => c.id === r.catId)
-      pRows.push([r.store, c ? c.name : '—', r.amount, heDate(r.date)])
+  // טוען ExcelJS מ-CDN פעם אחת (תומך בעיצוב מלא, בניגוד ל-xlsx)
+  if (!window.ExcelJS) {
+    await new Promise((res, rej) => {
+      const s = document.createElement('script')
+      s.src = 'https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js'
+      s.onload = res; s.onerror = () => rej(new Error('load failed'))
+      document.head.appendChild(s)
     })
-  } else {
-    pRows.push(['לא הוגדר'])
   }
-  const wsPar = XLSX.utils.aoa_to_sheet(pRows)
-  wsPar['!cols'] = [{ wch: 22 }, { wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 14 }]
-  XLSX.utils.book_append_sheet(wb, wsPar, 'תשלומי הורים')
-
-  XLSX.writeFile(wb, `דוח_כספי_${gardenName}_${academicYear()}.xlsx`)
+  const { buildOfficialWorkbook } = await import('./officialExcel.js')
+  const wb = await buildOfficialWorkbook(window.ExcelJS, {
+    gardenName, year: academicYear(),
+    city: budgets.city || { pulses: [] },
+    parents: budgets.parents || { cats: [], pulses: [] },
+    receipts: { city: receipts.city || [], parents: receipts.parents || [] },
+  })
+  const buf = await wb.xlsx.writeBuffer()
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }))
+  a.download = `דוח_כספי_${gardenName}_${academicYear()}.xlsx`
+  a.click(); URL.revokeObjectURL(a.href)
 }
 
 async function parseExcel(file) {
