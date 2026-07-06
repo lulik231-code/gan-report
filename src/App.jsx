@@ -412,14 +412,41 @@ function BudgetPanel({ budget, receipts, onAddPulse, onAddReceipt, onEdit, onDel
 function AdminPanel({ onClose, toast }) {
   const [list, setList] = useState(null)
   const [reqs, setReqs] = useState([])
+  const [pays, setPays] = useState([])
+  const [price, setPrice] = useState('')
   useEffect(() => {
     (async () => {
       const { data } = await supa.from('profiles').select('*').order('created_at', { ascending: true })
       setList(data || [])
       const { data: rq } = await supa.from('subscription_requests').select('*').eq('status', 'pending')
       setReqs(rq || [])
+      const { data: pp } = await supa.from('payments').select('*').eq('status', 'pending').order('created_at', { ascending: true })
+      setPays(pp || [])
+      const { data: st } = await supa.from('billing_settings').select('*').eq('id', 1).single()
+      if (st) setPrice(String(st.monthly_price))
     })()
   }, [])
+  const savePrice = async () => {
+    const v = Number(price)
+    if (!v || v <= 0) { toast('מחיר לא תקין', 'bad'); return }
+    const { error } = await supa.from('billing_settings').update({ monthly_price: v, updated_at: new Date().toISOString() }).eq('id', 1)
+    toast(error ? 'שמירת המחיר נכשלה' : 'מחיר המנוי עודכן', error ? 'bad' : 'good')
+  }
+  const approvePay = async p => {
+    const { error } = await supa.rpc('approve_payment', { p_payment_id: p.id })
+    if (error) { toast('אישור התשלום נכשל', 'bad'); return }
+    setPays(ps => ps.filter(x => x.id !== p.id))
+    setReqs(r => r.filter(x => x.user_id !== p.user_id))
+    const until = u => { const base = new Date(Math.max(Date.now(), u.paid_until ? new Date(u.paid_until).getTime() : 0)); base.setMonth(base.getMonth() + (p.months || 1)); return base.toISOString() }
+    setList(l => l.map(u => u.id === p.user_id ? { ...u, plan: 'paid', status: 'active', paid_until: until(u) } : u))
+    toast('התשלום אושר והמנוי הופעל', 'good')
+  }
+  const cancelPay = async p => {
+    const { error } = await supa.rpc('cancel_payment', { p_payment_id: p.id })
+    if (error) { toast('הפעולה נכשלה', 'bad'); return }
+    setPays(ps => ps.filter(x => x.id !== p.id))
+    toast('הבקשה בוטלה', 'good')
+  }
   const patch = async (id, fields, msg) => {
     const { error } = await supa.from('profiles').update(fields).eq('id', id)
     if (error) { toast('הפעולה נכשלה', 'bad'); return false }
@@ -464,8 +491,27 @@ function AdminPanel({ onClose, toast }) {
             <div className="astat"><span className="astat-n">{stats.total}</span><span className="astat-l">משתמשות</span></div>
             <div className="astat"><span className="astat-n">{stats.paid}</span><span className="astat-l">מנויות</span></div>
             <div className="astat"><span className="astat-n">{stats.blocked}</span><span className="astat-l">חסומות</span></div>
-            <div className="astat"><span className="astat-n astat-amber">{stats.pending}</span><span className="astat-l">בקשות מנוי</span></div>
+            <div className="astat"><span className="astat-n astat-amber">{pays.length}</span><span className="astat-l">תשלומים לאישור</span></div>
           </div>
+          <div className="admin-price">
+            <span className="ap-lbl"><CreditCard size={14} /> מחיר מנוי חודשי</span>
+            <div className="ap-row"><input className="control ap-input" type="number" value={price} onChange={e => setPrice(e.target.value)} /><span className="ap-cur">₪</span><button className="abtn abtn-green" onClick={savePrice}>שמירה</button></div>
+          </div>
+          {pays.length > 0 && list && (
+            <div className="admin-pays">
+              <div className="log-title"><CreditCard size={15} /> תשלומים ממתינים לאישור</div>
+              {pays.map(p => { const u = list.find(x => x.id === p.user_id); return (
+                <div className="pay-row" key={p.id}>
+                  <div className="pay-main"><b>{u?.full_name || u?.email || '—'}</b><span className="pay-meta">{nis(p.amount)} · {p.months === 1 ? 'חודש אחד' : p.months + ' חודשים'} · {heDate(p.created_at)}</span></div>
+                  <div className="pay-actions">
+                    <button className="abtn abtn-green" onClick={() => approvePay(p)}><CheckCircle2 size={13} /> התשלום התקבל</button>
+                    <button className="abtn abtn-red" onClick={() => cancelPay(p)}><X size={13} /> ביטול</button>
+                  </div>
+                </div>
+              )})}
+              <p className="foot-note" style={{ margin: '6px 0 0' }}>לאחר גביית התשלום (העברה / ביט / סליקה עתידית) — לחצי "התשלום התקבל" והמנוי יופעל אוטומטית.</p>
+            </div>
+          )}
           {list === null ? <div className="foot-note">טוען…</div> : (
             <div className="admin-list">
               {list.map(u => (
@@ -618,10 +664,32 @@ function BlockedScreen({ onLogout }) {
 function SubscribeScreen({ profile, onLogout, toast }) {
   const [sent, setSent] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [settings, setSettings] = useState(null)
+  useEffect(() => {
+    (async () => {
+      const { data } = await supa.from('billing_settings').select('*').eq('id', 1).single()
+      setSettings(data || { monthly_price: 29, currency: 'ILS', provider: '' })
+      // אם כבר יש תשלום ממתין — להציג את מסך "הבקשה התקבלה"
+      const { data: pend } = await supa.from('payments').select('id').eq('user_id', profile.id).eq('status', 'pending').limit(1)
+      if (pend && pend.length) setSent(true)
+    })()
+  }, [])
   const request = async () => {
     setBusy(true)
-    // TODO: חיבור מערכת סליקה — כשתחובר, הכפתור יוביל לעמוד תשלום במקום לשלוח בקשה ידנית
-    const { error } = await supa.from('subscription_requests').insert({ user_id: profile.id })
+    const price = settings?.monthly_price ?? 29
+    // כשתחובר מערכת סליקה (settings.provider), הפונקציה create-checkout תחזיר קישור לעמוד תשלום
+    if (settings?.provider) {
+      try {
+        const res = await fetch('/.netlify/functions/create-checkout', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: profile.id, email: profile.email, amount: price, months: 1 }),
+        })
+        const j = await res.json()
+        if (j?.checkout_url) { window.location.href = j.checkout_url; return }
+      } catch { /* נופל חזרה לבקשה ידנית */ }
+    }
+    const { error } = await supa.from('payments').insert({ user_id: profile.id, amount: price, months: 1, note: 'בקשת מנוי חודשי' })
+    if (!error) await supa.from('subscription_requests').insert({ user_id: profile.id })
     setBusy(false)
     if (error) { toast('שליחת הבקשה נכשלה, נסי שוב', 'bad'); return }
     setSent(true)
@@ -637,6 +705,7 @@ function SubscribeScreen({ profile, onLogout, toast }) {
           <p className="subt">הנתונים שלך שמורים בענן. כדי להמשיך לנהל את כספי הגן, הצטרפי למנוי:</p>
           <div className="sub-card">
             <div className="sub-name"><CreditCard size={18} /> מנוי גן־ריפורט</div>
+            {settings && <div className="sub-price">{nis(settings.monthly_price)}<span> / חודש</span></div>}
             <ul className="sub-feats">
               <li>מעקב קצבת עירייה ותשלומי הורים</li>
               <li>סריקת קבלות וייצוא לאקסל</li>
