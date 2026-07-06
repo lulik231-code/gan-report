@@ -84,6 +84,10 @@ export async function buildOfficialWorkbook(ExcelJS, data) {
     set(ws, 1, 1, 'תשלומי הורים -  עודף יוחזר בסוף השנה ', { fill: C.red, size: 18, center: true })
     set(ws, 2, 1, `טופס דיווח הכנסות והוצאות - גני ילדים - ${data.gardenName || ''} - שנת לימוד ${data.year || ''}`, { bold: true, size: 14 })
 
+    // יתרה משנה קודמת — סעיף עצמאי אחד (לא מתחלק בין הקטגוריות)
+    ws.mergeCells(5, 1, 5, 2)
+    set(ws, 5, 1, 'יתרה משנה קודמת', { bold: true, border: boxM, center: true })
+    set(ws, 5, 3, par.prevBalance || null, { fill: C.pink, bold: true, border: boxM, numFont: true, fmt: '0.00' })
     // פעימות הכנסה — מחצית א (עד 31/12) ומחצית ב
     const all = sortAsc(par.pulses)
     const h1 = all.filter(p => { const d = dt(p.date); return !d || d.getMonth() >= 7 }) // אוג-דצמ
@@ -109,15 +113,10 @@ export async function buildOfficialWorkbook(ExcelJS, data) {
     const bodyRows = maxLen + 3
     const sumTotalRow = 26, sumExpRow = 28, balRow = 30
     const colLetter = n => { let s = ''; while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = (n - m - 1) / 26 } return s }
-    const blockSumCells = [], prevCells = []
+    const blockSumCells = []
     cats.forEach((cat, k) => {
       const c0 = 6 + k * 6
       const L = [colLetter(c0), colLetter(c0 + 1), colLetter(c0 + 2), colLetter(c0 + 3)]
-      // יתרה משנה קודמת
-      ws.mergeCells(5, c0, 5, c0 + 2)
-      set(ws, 5, c0, 'יתרה משנה קודמת', { bold: true, border: boxM, center: true })
-      set(ws, 5, c0 + 3, cat.prevBalance ?? null, { fill: C.pink, bold: true, border: boxM, numFont: true, fmt: '0.00' })
-      prevCells.push(`${L[3]}5`)
       // חלק יחסי
       const amt = cat.annualPerChild || 0
       set(ws, 7, c0, `חלק יחסי של ${cat.name}`)
@@ -129,7 +128,7 @@ export async function buildOfficialWorkbook(ExcelJS, data) {
       set(ws, 9, c0, `${cat.name} ${amt} ₪`, { fill: C.orange, bold: true, border: boxT, center: true })
       set(ws, 10, c0 + 1, 'פירוט', { border: boxT }); set(ws, 10, c0 + 2, 'סכום', { fill: C.yellow, border: boxT }); set(ws, 10, c0 + 3, 'יתרה', { border: boxT, fmt: '0.00' })
       set(ws, 11, c0, 'הכנסה בפועל', { border: boxT })
-      set(ws, 11, c0 + 3, F(`${L[3]}7+${L[3]}5`), { border: boxT, bold: true, numFont: true, fmt: '0.00' })
+      set(ws, 11, c0 + 3, F(`${L[3]}7`), { border: boxT, bold: true, numFont: true, fmt: '0.00' })
       const exp = sortAsc(recAll.filter(r => r.catId === cat.id))
       for (let i = 0; i < bodyRows; i++) {
         const r = 12 + i, e = exp[i]
@@ -150,7 +149,7 @@ export async function buildOfficialWorkbook(ExcelJS, data) {
     set(ws, sumExpRow, 1, 'סה"כ הוצאות ', { fill: C.red, bold: true })
     set(ws, sumExpRow, 2, blockSumCells.length ? F(blockSumCells.join('+')) : 0, { fill: C.red, bold: true, numFont: true, fmt: '0.00' })
     set(ws, balRow, 1, 'יתרה בהורים ', { fill: C.gray, bold: true })
-    set(ws, balRow, 2, F(`B${sumTotalRow}-B${sumExpRow}${prevCells.length ? '+' + prevCells.join('+') : ''}`), { fill: C.gray, bold: true, numFont: true, fmt: ACC })
+    set(ws, balRow, 2, F(`B${sumTotalRow}-B${sumExpRow}+C5`), { fill: C.gray, bold: true, numFont: true, fmt: ACC })
     // יתרה בכרטיס
     ws.mergeCells(2, 8, 2, 9); set(ws, 2, 8, 'יתרה בכרטיס ', { fill: C.purple, size: 16, border: boxT })
     set(ws, 2, 10, F(`B${balRow}`), { fill: C.purple, size: 16, numFont: true, fmt: ACC })

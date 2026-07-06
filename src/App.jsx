@@ -152,9 +152,10 @@ function ParentsSetup({ existing, onClose, onSave, toast }) {
   const [perChild, setPerChild] = useState(existing?.perChild || '')
   const [numKids, setNumKids] = useState(existing?.numKids || '')
   const [adjust, setAdjust] = useState(existing?.adjust || '')
-  const [cats, setCats] = useState(existing?.cats?.map(c => ({ id: c.id, icon: c.icon, name: c.name, amount: String(c.annualPerChild), prev: c.prevBalance ? String(c.prevBalance) : '' })) || [
-    { icon: 'food', name: 'הזנה', amount: '', prev: '' }, { icon: 'culture', name: 'סל תרבות', amount: '', prev: '' },
-    { icon: 'trip', name: 'טיולים', amount: '', prev: '' }, { icon: 'party', name: 'מסיבת סיום', amount: '', prev: '' },
+  const [prevBal, setPrevBal] = useState(existing?.prevBalance ? String(existing.prevBalance) : '')
+  const [cats, setCats] = useState(existing?.cats?.map(c => ({ id: c.id, icon: c.icon, name: c.name, amount: String(c.annualPerChild) })) || [
+    { icon: 'food', name: 'הזנה', amount: '' }, { icon: 'culture', name: 'סל תרבות', amount: '' },
+    { icon: 'trip', name: 'טיולים', amount: '' }, { icon: 'party', name: 'מסיבת סיום', amount: '' },
   ])
   const [excelBusy, setExcelBusy] = useState(false)
   const setCat = (i, k, v) => setCats(c => c.map((x, j) => j === i ? { ...x, [k]: v } : x))
@@ -183,12 +184,11 @@ function ParentsSetup({ existing, onClose, onSave, toast }) {
       return {
         id: c.id || uid(), icon: c.icon, name: c.name,
         annualPerChild: parseFloat(c.amount), pct,
-        prevBalance: parseFloat(c.prev) || 0,
         allocated: totalReceived * (pct / 100),   // recomputed from actual income × new %
         spent: prev?.spent || 0,                    // keep real spending
       }
     })
-    onSave({ type: 'parents', perChild: perChildN, numKids: kidsN, adjust: adjustN, expected, received: existing?.received || 0, spent: existing?.spent || 0, cats: catObjs, pulses: existing?.pulses || [], year: academicYear() })
+    onSave({ type: 'parents', perChild: perChildN, numKids: kidsN, adjust: adjustN, prevBalance: parseFloat(prevBal) || 0, expected, received: existing?.received || 0, spent: existing?.spent || 0, cats: catObjs, pulses: existing?.pulses || [], year: academicYear() })
     toast('נשמר', 'good'); onClose()
   }
   return (
@@ -201,21 +201,17 @@ function ParentsSetup({ existing, onClose, onSave, toast }) {
             <div className="field"><label><Baby size={14} /> מספר ילדים</label><input className="control" type="number" value={numKids} onChange={e => setNumKids(e.target.value)} placeholder="35" /></div>
             <div className="field"><label><Percent size={14} /> הנחות / לא שולם</label><div className="amount-field"><input className="control" type="number" value={adjust} onChange={e => setAdjust(e.target.value)} placeholder="0" /><span className="currency">₪</span></div></div>
           </div>
+          <div className="field" style={{ marginBottom: 14 }}><label><Coins size={14} /> יתרה משנה קודמת (רשות — סעיף כללי, לא מתחלק בין הקטגוריות)</label><div className="amount-field"><input className="control" type="number" value={prevBal} onChange={e => setPrevBal(e.target.value)} placeholder="0" /><span className="currency">₪</span></div></div>
           <div className="expected-banner"><div><span className="lbl">צפי הכנסה כולל לשנה</span><span className="big">{nis(expected)}</span></div><div className="calc">{nis(perChildN)} × {kidsN} ילדים{adjustN > 0 ? ` − ${nis(adjustN)}` : ''}</div></div>
           <div className="field-head"><label>התפלגות שנתית (סכום לילד לכל קטגוריה)</label><label className="mini-upload">{excelBusy ? 'קורא…' : <><FileSpreadsheet size={15} /> ייבוא אקסל</>}<input type="file" accept=".xlsx,.xls,.csv" onChange={onExcel} hidden /></label></div>
-          <div className="hint" style={{ marginTop: 0, marginBottom: 12 }}>כל פעימת הכנסה תתחלק אוטומטית לפי האחוזים. בשדה השני של כל שורה אפשר לרשום עודף משנה קודמת (רשות) — הוא יתווסף ליתרה ויופיע בדוח הרשמי.</div>
+          <div className="hint" style={{ marginTop: 0, marginBottom: 12 }}>כל פעימת הכנסה תתחלק אוטומטית לפי האחוזים.</div>
           {cats.map((c, i) => { const pct = catSum > 0 ? ((parseFloat(c.amount) || 0) / catSum) * 100 : 0; return (
             <div className="cat-edit" key={i}>
-              <div className="cat-row1">
-                <div className="cat-ic"><CatIcon name={c.icon} size={18} /></div>
-                <input className="control name-in" value={c.name} onChange={e => setCat(i, 'name', e.target.value)} placeholder="שם קטגוריה" />
-                <span className="pct-chip">{pct.toFixed(0)}%</span>
-                <button className="del" onClick={() => delCat(i)}><Trash2 size={16} /></button>
-              </div>
-              <div className="cat-row2">
-                <div className="fieldlet"><span>סכום לילד</span><div className="amount-field"><input className="control amt-in" type="number" value={c.amount} onChange={e => setCat(i, 'amount', e.target.value)} placeholder="0" /><span className="currency sm">₪</span></div></div>
-                <div className="fieldlet"><span>עודף משנה קודמת</span><div className="amount-field"><input className="control amt-in" type="number" value={c.prev} onChange={e => setCat(i, 'prev', e.target.value)} placeholder="0" /><span className="currency sm">₪</span></div></div>
-              </div>
+              <div className="cat-ic"><CatIcon name={c.icon} size={18} /></div>
+              <input className="control name-in" value={c.name} onChange={e => setCat(i, 'name', e.target.value)} placeholder="שם קטגוריה" />
+              <div className="amount-field amt-wrap"><input className="control amt-in" type="number" value={c.amount} onChange={e => setCat(i, 'amount', e.target.value)} placeholder="0" /><span className="currency sm">₪</span></div>
+              <span className="pct-chip">{pct.toFixed(0)}%</span>
+              <button className="del" onClick={() => delCat(i)}><Trash2 size={16} /></button>
             </div>) })}
           <button className="btn btn-outline btn-block" onClick={addCat} style={{ marginTop: 4, padding: 11 }}><Plus size={17} /> הוספת קטגוריה</button>
           <div className="sum-box"><div className="sum-line"><span>סה״כ התפלגות לילד</span><b>{nis(catSum)}</b></div><div className="sum-line"><span>מהתשלום השנתי ({nis(perChildN)})</span><b className={catSum <= perChildN + 0.5 ? 'sum-ok' : 'sum-bad'}>{perChildN > 0 ? Math.round(catSum / perChildN * 100) : 0}%</b></div></div>
@@ -339,7 +335,7 @@ function ReceiptModal({ budget, onClose, onSave, toast }) {
 function BudgetPanel({ budget, receipts, onAddPulse, onAddReceipt, onEdit, onDeleteReceipt, onDeletePulse, toast }) {
   const [showPulse, setShowPulse] = useState(false), [showReceipt, setShowReceipt] = useState(false)
   const isCity = budget.type === 'city'
-  const prevB = budget.type === 'city' ? (budget.prevBalance || 0) : (budget.cats || []).reduce((s, c) => s + (c.prevBalance || 0), 0)
+  const prevB = budget.prevBalance || 0
   const income = (budget.received || 0) + prevB, remaining = income - budget.spent
   const futureExpected = Math.max(0, (budget.expected || 0) - income)
   const max = isCity ? 10 : 12, pulses = budget.pulses || []
@@ -363,7 +359,7 @@ function BudgetPanel({ budget, receipts, onAddPulse, onAddReceipt, onEdit, onDel
         <button className="pa-btn ghost" onClick={onEdit}><PencilLine size={16} /> {isCity ? 'עריכת קצבה' : 'הגדרות'}</button>
       </div>
       {!isCity && budget.cats.length > 0 && (
-        <div className="cat-cards">{budget.cats.map(c => { const alloc = c.allocated + (c.prevBalance || 0), left = alloc - c.spent, pct = alloc > 0 ? Math.min(100, c.spent / alloc * 100) : 0; return (
+        <div className="cat-cards">{budget.cats.map(c => { const left = c.allocated - c.spent, pct = c.allocated > 0 ? Math.min(100, c.spent / c.allocated * 100) : 0; return (
           <div className="cat-card" key={c.id}>
             <div className="cc-top"><div className="cc-ic"><CatIcon name={c.icon} size={20} /></div><span className="cc-pct">{c.pct.toFixed(0)}%</span></div>
             <div className="cc-name">{c.name}</div>
