@@ -300,11 +300,11 @@ function PulseModal({ budget, onClose, onSave, toast }) {
   )
 }
 
-async function runOCR(base64) {
+async function runOCR(base64, mediaType) {
   try {
     const res = await fetch('/.netlify/functions/ocr', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ image: base64 }),
+      body: JSON.stringify({ image: base64, mediaType }),
     })
     if (!res.ok) return { amount: null, store: null, date: null, confidence: 0 }
     return await res.json()
@@ -320,7 +320,7 @@ function ReceiptModal({ budget, onClose, onSave, toast }) {
     const file = e.target.files?.[0]; if (!file) return
     if (file.size > 6 * 1024 * 1024) { toast('קובץ גדול מדי (עד 6MB)', 'bad'); return }
     setBusy(true); const r = new FileReader()
-    r.onload = async ev => { const d = ev.target.result; setImg(d); const o = await runOCR(d.split(',')[1]); setConf(o.confidence); setForm(f => ({ ...f, amount: o.amount ?? '', store: o.store ?? '', date: o.date ?? f.date })); setBusy(false) }
+    r.onload = async ev => { const d = ev.target.result; setImg(d); const mt = d.slice(5, d.indexOf(';')); const o = await runOCR(d.split(',')[1], mt); if (o.error) toast(o.error === 'no_key' ? 'זיהוי אוטומטי לא מוגדר — חסר מפתח API' : 'הזיהוי האוטומטי נכשל, אפשר להקליד ידנית', 'bad'); setConf(o.confidence); setForm(f => ({ ...f, amount: o.amount ?? '', store: o.store ?? '', date: o.date ?? f.date })); setBusy(false) }
     r.readAsDataURL(file)
   }
   const save = () => { if (!form.amount || parseFloat(form.amount) <= 0) { toast('צריך סכום', 'bad'); return } if (!isCity && !form.catId) { toast('צריך לבחור קטגוריה', 'bad'); return } onSave({ id: uid(), amount: parseFloat(form.amount), store: form.store || 'ללא שם', date: form.date, catId: isCity ? null : form.catId, img, createdAt: Date.now() }); toast('הקבלה נשמרה', 'good'); onClose() }
