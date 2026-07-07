@@ -152,7 +152,6 @@ function ParentsSetup({ existing, onClose, onSave, toast }) {
   const [perChild, setPerChild] = useState(existing?.perChild || '')
   const [numKids, setNumKids] = useState(existing?.numKids || '')
   const [adjust, setAdjust] = useState(existing?.adjust || '')
-  const [prevBal, setPrevBal] = useState(existing?.prevBalance ? String(existing.prevBalance) : '')
   const [cats, setCats] = useState(existing?.cats?.map(c => ({ id: c.id, icon: c.icon, name: c.name, amount: String(c.annualPerChild) })) || [
     { icon: 'food', name: 'הזנה', amount: '' }, { icon: 'culture', name: 'סל תרבות', amount: '' },
     { icon: 'trip', name: 'טיולים', amount: '' }, { icon: 'party', name: 'מסיבת סיום', amount: '' },
@@ -188,7 +187,7 @@ function ParentsSetup({ existing, onClose, onSave, toast }) {
         spent: prev?.spent || 0,                    // keep real spending
       }
     })
-    onSave({ type: 'parents', perChild: perChildN, numKids: kidsN, adjust: adjustN, prevBalance: parseFloat(prevBal) || 0, expected, received: existing?.received || 0, spent: existing?.spent || 0, cats: catObjs, pulses: existing?.pulses || [], year: academicYear() })
+    onSave({ type: 'parents', perChild: perChildN, numKids: kidsN, adjust: adjustN, expected, received: existing?.received || 0, spent: existing?.spent || 0, cats: catObjs, pulses: existing?.pulses || [], year: academicYear() })
     toast('נשמר', 'good'); onClose()
   }
   return (
@@ -201,7 +200,6 @@ function ParentsSetup({ existing, onClose, onSave, toast }) {
             <div className="field"><label><Baby size={14} /> מספר ילדים</label><input className="control" type="number" value={numKids} onChange={e => setNumKids(e.target.value)} placeholder="35" /></div>
             <div className="field"><label><Percent size={14} /> הנחות / לא שולם</label><div className="amount-field"><input className="control" type="number" value={adjust} onChange={e => setAdjust(e.target.value)} placeholder="0" /><span className="currency">₪</span></div></div>
           </div>
-          <div className="field" style={{ marginBottom: 14 }}><label><Coins size={14} /> יתרה משנה קודמת (רשות — סעיף כללי, לא מתחלק בין הקטגוריות)</label><div className="amount-field"><input className="control" type="number" value={prevBal} onChange={e => setPrevBal(e.target.value)} placeholder="0" /><span className="currency">₪</span></div></div>
           <div className="expected-banner"><div><span className="lbl">צפי הכנסה כולל לשנה</span><span className="big">{nis(expected)}</span></div><div className="calc">{nis(perChildN)} × {kidsN} ילדים{adjustN > 0 ? ` − ${nis(adjustN)}` : ''}</div></div>
           <div className="field-head"><label>התפלגות שנתית (סכום לילד לכל קטגוריה)</label><label className="mini-upload">{excelBusy ? 'קורא…' : <><FileSpreadsheet size={15} /> ייבוא אקסל</>}<input type="file" accept=".xlsx,.xls,.csv" onChange={onExcel} hidden /></label></div>
           <div className="hint" style={{ marginTop: 0, marginBottom: 12 }}>כל פעימת הכנסה תתחלק אוטומטית לפי האחוזים.</div>
@@ -224,9 +222,8 @@ function ParentsSetup({ existing, onClose, onSave, toast }) {
 
 function CitySetup({ existing, onClose, onSave, toast }) {
   const [note, setNote] = useState(existing?.note || '')
-  const [prevBal, setPrevBal] = useState(existing?.prevBalance ? String(existing.prevBalance) : '')
   const save = () => {
-    onSave({ type: 'city', expected: 0, note, prevBalance: parseFloat(prevBal) || 0, received: existing?.received || 0, spent: existing?.spent || 0, cats: [], pulses: existing?.pulses || [], year: academicYear() })
+    onSave({ type: 'city', expected: 0, note, received: existing?.received || 0, spent: existing?.spent || 0, cats: [], pulses: existing?.pulses || [], year: academicYear() })
     toast('נשמר', 'good'); onClose()
   }
   return (
@@ -238,7 +235,6 @@ function CitySetup({ existing, onClose, onSave, toast }) {
             <Building2 size={20} />
             <div>בקצבת עירייה אין צורך להזין סכום שנתי מראש. פשוט רשמי כל פעימת הכנסה שמתקבלת מהעירייה, וצלמי קבלות — היתרה תתעדכן לבד.</div>
           </div>
-          <div className="field"><label>יתרה משנה קודמת (רשות)</label><div className="amount-field"><input className="control" type="number" value={prevBal} onChange={e => setPrevBal(e.target.value)} placeholder="0" /><span className="currency">₪</span></div></div>
           <div className="field"><label>הערה (רשות)</label><input className="control" value={note} onChange={e => setNote(e.target.value)} placeholder="לדוגמה: שנת תקציב 2026" /></div>
           <button className="btn btn-clay btn-block" onClick={save} style={{ marginTop: 6 }}>{existing ? 'שמירה' : 'התחלה'}</button>
         </div>
@@ -335,8 +331,7 @@ function ReceiptModal({ budget, onClose, onSave, toast }) {
 function BudgetPanel({ budget, receipts, onAddPulse, onAddReceipt, onEdit, onDeleteReceipt, onDeletePulse, toast }) {
   const [showPulse, setShowPulse] = useState(false), [showReceipt, setShowReceipt] = useState(false)
   const isCity = budget.type === 'city'
-  const prevB = budget.prevBalance || 0
-  const income = (budget.received || 0) + prevB, remaining = income - budget.spent
+  const income = budget.received || 0, remaining = income - budget.spent
   const futureExpected = Math.max(0, (budget.expected || 0) - income)
   const max = isCity ? 10 : 12, pulses = budget.pulses || []
   const catNameOf = r => { const c = budget.cats.find(c => c.id === r.catId); return c ? c.name : (isCity ? 'קצבת עירייה' : '—') }

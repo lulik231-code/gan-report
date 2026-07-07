@@ -1,5 +1,5 @@
 // buildOfficialWorkbook — משכפל את פורמט טופס הדיווח הרשמי (הקצבת עירייה + תשלומי הורים)
-// data: { gardenName, year, city: {pulses, prevBalance?}, parents: {perChild, cats, pulses, prevBalance?}, receipts: {city:[], parents:[]} }
+// data: { gardenName, year, city: {pulses}, parents: {perChild, cats, pulses}, receipts: {city:[], parents:[]} }
 export async function buildOfficialWorkbook(ExcelJS, data) {
   const wb = new ExcelJS.Workbook()
   const FS = 'FreeSans', CA = 'Calibri'
@@ -38,17 +38,13 @@ export async function buildOfficialWorkbook(ExcelJS, data) {
     for (let r = 2 + pulses.length; r < sumRow; r++) { set(ws, r, 1, null, { border: boxT }); set(ws, r, 2, null, { fill: C.yellow, border: boxT }) }
     set(ws, sumRow, 1, 'סה"כ', { fill: C.green, border: boxT })
     set(ws, sumRow, 2, F(`SUM(B2:B${sumRow - 1})`), { fill: C.green, border: boxT, numFont: true })
-    // יתרה משנה קודמת
-    ws.mergeCells(2, 4, 2, 6)
-    set(ws, 2, 4, 'יתרה משנה קודמת', { bold: true, border: boxM, center: true })
-    set(ws, 2, 7, data.city?.prevBalance ?? null, { fill: C.pink, bold: true, border: boxM, numFont: true })
     // טבלת הוצאות
     const tTitle = sumRow - 2, tHead = sumRow - 1
     ws.mergeCells(tTitle, 4, tTitle, 7)
     set(ws, tTitle, 4, 'הקצבת עירייה', { fill: C.orange, border: boxT, center: true })
     set(ws, tHead, 5, 'פירוט', { border: boxT }); set(ws, tHead, 6, 'סכום', { border: boxT }); set(ws, tHead, 7, 'יתרה', { border: boxT, fmt: '0' })
     set(ws, sumRow, 4, 'הכנסה בפועל', { border: boxT })
-    set(ws, sumRow, 7, F(`B${sumRow}+G2`), { border: boxT, bold: true, numFont: true, fmt: '0.00' })
+    set(ws, sumRow, 7, F(`B${sumRow}`), { border: boxT, bold: true, numFont: true, fmt: '0.00' })
     const exp = sortAsc(data.receipts?.city)
     const rows = exp.length + 3
     for (let i = 0; i < rows; i++) {
@@ -65,7 +61,7 @@ export async function buildOfficialWorkbook(ExcelJS, data) {
     ws.mergeCells(2, 9, 2, 10); set(ws, 2, 9, 'יתרה בכרטיס ', { fill: C.purple, size: 16, border: boxT })
     ws.mergeCells(2, 11, 2, 14); set(ws, 2, 11, F('K7'), { fill: C.purple, size: 16, numFont: true, fmt: ACC })
     ws.mergeCells(4, 9, 4, 10); set(ws, 4, 9, 'סה"כ הקצבות עירייה', { fill: C.green, border: boxT })
-    set(ws, 4, 11, F(`B${sumRow}+G2`), { fill: C.green, border: boxT, numFont: true, fmt: '0.00' })
+    set(ws, 4, 11, F(`B${sumRow}`), { fill: C.green, border: boxT, numFont: true, fmt: '0.00' })
     set(ws, 5, 9, 'סה"כ הוצאות ', { fill: C.red, border: boxT })
     set(ws, 5, 11, F(`F${eSum}`), { fill: C.red, border: boxT, numFont: true, fmt: '0.00' })
     ws.mergeCells(7, 9, 7, 10); set(ws, 7, 9, 'יתרה בהקצבות עירייה', { fill: C.gray, border: boxT })
@@ -84,10 +80,6 @@ export async function buildOfficialWorkbook(ExcelJS, data) {
     set(ws, 1, 1, 'תשלומי הורים -  עודף יוחזר בסוף השנה ', { fill: C.red, size: 18, center: true })
     set(ws, 2, 1, `טופס דיווח הכנסות והוצאות - גני ילדים - ${data.gardenName || ''} - שנת לימוד ${data.year || ''}`, { bold: true, size: 14 })
 
-    // יתרה משנה קודמת — סעיף עצמאי אחד (לא מתחלק בין הקטגוריות)
-    ws.mergeCells(5, 1, 5, 2)
-    set(ws, 5, 1, 'יתרה משנה קודמת', { bold: true, border: boxM, center: true })
-    set(ws, 5, 3, par.prevBalance || null, { fill: C.pink, bold: true, border: boxM, numFont: true, fmt: '0.00' })
     // פעימות הכנסה — מחצית א (עד 31/12) ומחצית ב
     const all = sortAsc(par.pulses)
     const h1 = all.filter(p => { const d = dt(p.date); return !d || d.getMonth() >= 7 }) // אוג-דצמ
@@ -149,7 +141,7 @@ export async function buildOfficialWorkbook(ExcelJS, data) {
     set(ws, sumExpRow, 1, 'סה"כ הוצאות ', { fill: C.red, bold: true })
     set(ws, sumExpRow, 2, blockSumCells.length ? F(blockSumCells.join('+')) : 0, { fill: C.red, bold: true, numFont: true, fmt: '0.00' })
     set(ws, balRow, 1, 'יתרה בהורים ', { fill: C.gray, bold: true })
-    set(ws, balRow, 2, F(`B${sumTotalRow}-B${sumExpRow}+C5`), { fill: C.gray, bold: true, numFont: true, fmt: ACC })
+    set(ws, balRow, 2, F(`B${sumTotalRow}-B${sumExpRow}`), { fill: C.gray, bold: true, numFont: true, fmt: ACC })
     // יתרה בכרטיס
     ws.mergeCells(2, 8, 2, 9); set(ws, 2, 8, 'יתרה בכרטיס ', { fill: C.purple, size: 16, border: boxT })
     set(ws, 2, 10, F(`B${balRow}`), { fill: C.purple, size: 16, numFont: true, fmt: ACC })
