@@ -4,7 +4,7 @@ import {
   FileSpreadsheet, PencilLine, LogOut, Calendar, Sparkles, Receipt,
   UtensilsCrossed, Bus, Palette, PartyPopper, BookOpen, Package,
   Coins, Baby, Percent, Download, Shield, Mail, ChevronLeft,
-  Clock, CreditCard, Ban, CheckCircle2,
+  Clock, CreditCard, Ban, CheckCircle2, PenLine, FolderOpen, ArrowLeftRight, Paperclip, ImageIcon,
 } from 'lucide-react'
 import { supa } from './supa'
 
@@ -118,7 +118,7 @@ async function exportExcel(budgets, receipts, gardenName) {
     gardenName, year: academicYear(),
     city: budgets.city || { pulses: [] },
     parents: budgets.parents || { cats: [], pulses: [] },
-    receipts: { city: receipts.city || [], parents: receipts.parents || [] },
+    receipts: { city: (receipts.city || []).filter(r => r.counted !== false), parents: (receipts.parents || []).filter(r => r.counted !== false) },
   })
   const buf = await wb.xlsx.writeBuffer()
   const a = document.createElement('a')
@@ -291,8 +291,14 @@ async function runOCR(base64, mediaType) {
   } catch { return { amount: null, store: null, date: null, confidence: 0 } }
 }
 
-function ReceiptModal({ budget, onClose, onSave, toast }) {
+async function sha256(str) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str))
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('')
+}
+
+function ReceiptModal({ budget, allReceipts, onClose, onSave, toast }) {
   const [busy, setBusy] = useState(false), [img, setImg] = useState(null), [conf, setConf] = useState(null)
+  const [manual, setManual] = useState(false), [hash, setHash] = useState(null), [dup, setDup] = useState(null)
   const isCity = budget.type === 'city'
   const [form, setForm] = useState({ amount: '', store: '', date: new Date().toISOString().slice(0, 10), catId: '' })
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
@@ -300,27 +306,51 @@ function ReceiptModal({ budget, onClose, onSave, toast }) {
     const file = e.target.files?.[0]; if (!file) return
     if (file.size > 20 * 1024 * 1024) { toast('קובץ גדול מדי (עד 20MB)', 'bad'); return }
     setBusy(true); const r = new FileReader()
-    r.onload = async ev => { const d = await compressImage(ev.target.result); setImg(d); const o = await runOCR(d.split(',')[1], 'image/jpeg'); if (o.error) toast(o.error === 'no_key' ? 'זיהוי אוטומטי לא מוגדר — חסר מפתח API' : 'הזיהוי האוטומטי נכשל, אפשר להקליד ידנית', 'bad'); setConf(o.confidence); setForm(f => ({ ...f, amount: o.amount ?? '', store: o.store ?? '', date: o.date ?? f.date })); setBusy(false) }
+    r.onload = async ev => {
+      const d = await compressImage(ev.target.result); setImg(d)
+      const h = await sha256(d)
+      setHash(h)
+      const same = allReceipts.find(x => x.imgHash && x.imgHash === h)
+      if (same) setDup({ kind: 'image', r: same })
+      const o = await runOCR(d.split(',')[1], 'image/jpeg')
+      if (o.error) toast(o.error === 'no_key' ? 'זיהוי אוטומטי לא מוגדר — חסר מפתח API' : 'הזיהוי האוטומטי נכשל, אפשר להקליד ידנית', 'bad')
+      setConf(o.confidence); setForm(f => ({ ...f, amount: o.amount ?? '', store: o.store ?? '', date: o.date ?? f.date })); setBusy(false)
+    }
     r.readAsDataURL(file)
   }
-  const save = () => { if (!form.amount || parseFloat(form.amount) <= 0) { toast('צריך סכום', 'bad'); return } if (!isCity && !form.catId) { toast('צריך לבחור קטגוריה', 'bad'); return } onSave({ id: uid(), amount: parseFloat(form.amount), store: form.store || 'ללא שם', date: form.date, catId: isCity ? null : form.catId, img, createdAt: Date.now() }); toast('הקבלה נשמרה', 'good'); onClose() }
+  const save = () => {
+    if (!form.amount || parseFloat(form.amount) <= 0) { toast('צריך סכום', 'bad'); return }
+    if (!isCity && !form.catId) { toast('צריך לבחור קטגוריה', 'bad'); return }
+    const amt = parseFloat(form.amount)
+    // כפילות לפי סכום+תאריך (גם בהזנה ידנית)
+    if (!dup) {
+      const same = allReceipts.find(x => Math.abs(x.amount - amt) < 0.005 && x.date === form.date)
+      if (same) { setDup({ kind: 'fields', r: same }); return }
+    }
+    onSave({ id: crypto.randomUUID(), amount: amt, store: form.store || 'ללא שם', date: form.date, catId: isCity ? null : form.catId, img: manual ? null : img, imgHash: manual ? null : hash, hasReceipt: !manual, createdAt: Date.now() })
+    onClose()
+  }
   const cl = conf === null ? null : conf > 0.9 ? { t: 'זיהיתי את הפרטים — כדאי לאשר', c: 'ok' } : conf > 0.6 ? { t: 'בדקי את הפרטים', c: 'warn' } : { t: 'לא הצלחתי לקרוא — אפשר להקליד ידנית', c: 'bad' }
+  const showForm = manual || !!img
   return (
     <div className="overlay" onClick={onClose}>
       <div className="modal" onClick={e => e.stopPropagation()}>
-        <div className="modal-head"><div><div className="eyebrow">{isCity ? 'קצבת עירייה' : 'כספי הורים'}</div><h3>צילום קבלה</h3></div><button className="modal-x" onClick={onClose}><X size={20} /></button></div>
+        <div className="modal-head"><div><div className="eyebrow">{isCity ? 'קצבת עירייה' : 'כספי הורים'}</div><h3>{manual ? 'הזנה ידנית' : 'צילום קבלה'}</h3></div><button className="modal-x" onClick={onClose}><X size={20} /></button></div>
         <div className="modal-body">
-          {!img ? (
+          {!showForm ? (<>
             <label className="dropzone"><Camera size={40} strokeWidth={1.6} /><div className="dz-title">צילום או בחירת תמונה</div><div className="hint">כל תמונה מהמצלמה או מהגלריה</div><input type="file" accept="image/*" onChange={onFile} hidden /></label>
-          ) : <>
-            <img src={img} alt="קבלה" className="receipt-preview" />
+            <button className="btn btn-ghost btn-block" onClick={() => setManual(true)} style={{ marginTop: 10 }}><PenLine size={16} /> הזנה ידנית בלי צילום</button>
+          </>) : <>
+            {img && <img src={img} alt="קבלה" className="receipt-preview" />}
+            {manual && <div className="conf warn">הוצאה בלי קבלה סרוקה — תסומן "לשלוח לגזברות" כדי שתזכרי להעביר את הקבלה הפיזית</div>}
             {busy && <div className="reading">קורא את הקבלה…</div>}
-            {cl && <div className={'conf ' + cl.c}>{cl.t}</div>}
+            {!manual && cl && <div className={'conf ' + cl.c}>{cl.t}</div>}
+            {dup && <div className="conf bad">{dup.kind === 'image' ? 'שימי לב: הקבלה הזאת בדיוק כבר הועלתה' : 'שימי לב: כבר קיימת הוצאה באותו סכום ובאותו תאריך'} ({dup.r.store} · {nis(dup.r.amount)}). אפשר לשמור בכל זאת.</div>}
             <div className="field"><label>סכום <span className="req">*</span></label><div className="amount-field"><input className="control" type="number" value={form.amount} onChange={e => set('amount', e.target.value)} placeholder="0" /><span className="currency">₪</span></div></div>
             <div className="field"><label>חנות / ספק</label><input className="control" value={form.store} onChange={e => set('store', e.target.value)} placeholder="שם העסק" /></div>
             <div className="field"><label>תאריך <span className="req">*</span></label><input className="control" type="date" value={form.date} onChange={e => set('date', e.target.value)} /></div>
             {!isCity && <div className="field"><label>קטגוריה <span className="req">*</span></label><div className="cat-pick">{budget.cats.map(c => <button key={c.id} className={'cat-pick-btn' + (form.catId === c.id ? ' on' : '')} onClick={() => set('catId', c.id)}><CatIcon name={c.icon} size={17} /> {c.name}</button>)}</div></div>}
-            <button className="btn btn-clay btn-block" onClick={save} disabled={busy} style={{ marginTop: 6 }}>שמירת הקבלה</button>
+            <button className="btn btn-clay btn-block" onClick={save} disabled={busy} style={{ marginTop: 6 }}>{dup ? 'שמירה בכל זאת' : manual ? 'שמירת ההוצאה' : 'שמירת הקבלה'}</button>
           </>}
         </div>
       </div>
@@ -328,8 +358,10 @@ function ReceiptModal({ budget, onClose, onSave, toast }) {
   )
 }
 
-function BudgetPanel({ budget, receipts, onAddPulse, onAddReceipt, onEdit, onDeleteReceipt, onDeletePulse, toast }) {
+function BudgetPanel({ budget, budgets, receipts, onAddPulse, onAddReceipt, onEdit, onDeleteReceipt, onDeleteImage, onToggleCounted, onDeletePulse, onMoveReceipt, toast }) {
   const [showPulse, setShowPulse] = useState(false), [showReceipt, setShowReceipt] = useState(false)
+  const [showFolders, setShowFolders] = useState(false), [moveFor, setMoveFor] = useState(null)
+  const [delFor, setDelFor] = useState(null), [showDetail, setShowDetail] = useState(false)
   const isCity = budget.type === 'city'
   const income = budget.received || 0, remaining = income - budget.spent
   const futureExpected = Math.max(0, (budget.expected || 0) - income)
@@ -350,7 +382,9 @@ function BudgetPanel({ budget, receipts, onAddPulse, onAddReceipt, onEdit, onDel
       )}
       <div className="panel-actions">
         <button className="pa-btn primary" onClick={() => setShowPulse(true)} disabled={pulses.length >= max}><TrendingUp size={18} /> {pulses.length >= max ? 'הושלמו הפעימות' : 'פעימת הכנסה'} <span className="pa-count">{pulses.length}/{max}</span></button>
-        <button className="pa-btn" onClick={() => setShowReceipt(true)}><Camera size={18} /> צילום קבלה</button>
+        <button className="pa-btn" onClick={() => setShowReceipt(true)}><Camera size={18} /> הוספת קבלה</button>
+        <button className="pa-btn ghost" onClick={() => setShowFolders(true)}><FolderOpen size={16} /> תיקיות קבלות</button>
+        <button className="pa-btn ghost" onClick={() => setShowDetail(true)}><FileSpreadsheet size={16} /> דוח מפורט</button>
         <button className="pa-btn ghost" onClick={onEdit}><PencilLine size={16} /> {isCity ? 'עריכת קצבה' : 'הגדרות'}</button>
       </div>
       {!isCity && budget.cats.length > 0 && (
@@ -373,18 +407,187 @@ function BudgetPanel({ budget, receipts, onAddPulse, onAddReceipt, onEdit, onDel
             <div className="rtable-head"><span>ספק</span><span>קטגוריה</span><span>תאריך</span><span>סכום</span><span></span></div>
             {receipts.map(r => (
               <div className="rtable-row" key={r.id}>
-                <span className="rt-store">{r.img && <img src={r.img} className="rt-thumb" />}{r.store}</span>
+                <span className="rt-store">{r.hasReceipt ? <ImageIcon size={14} className="rt-ico ok" /> : <Paperclip size={14} className="rt-ico warn" />}{r.store}{!r.hasReceipt && r.counted !== false && <em className="rt-badge">לשלוח לגזברות</em>}{r.counted === false && <em className="rt-badge off">לא נספר</em>}</span>
                 <span className="rt-cat">{catNameOf(r)}</span>
                 <span className="rt-date">{heDate(r.date)}</span>
-                <span className="rt-amt">{nis(r.amount)}</span>
-                <button className="rt-del" onClick={() => onDeleteReceipt(r.id)}><Trash2 size={15} /></button>
+                <span className={'rt-amt' + (r.counted === false ? ' off' : '')}>{nis(r.amount)}</span>
+                <span className="rt-acts"><button className="rt-move" title="העברה לקטגוריה אחרת" onClick={() => setMoveFor(r)}><ArrowLeftRight size={15} /></button><button className="rt-del" onClick={() => setDelFor(r)}><Trash2 size={15} /></button></span>
               </div>
             ))}
           </div>
         )}
       </div>
       {showPulse && <PulseModal budget={budget} onClose={() => setShowPulse(false)} onSave={onAddPulse} toast={toast} />}
-      {showReceipt && <ReceiptModal budget={budget} onClose={() => setShowReceipt(false)} onSave={onAddReceipt} toast={toast} />}
+      {showReceipt && <ReceiptModal budget={budget} allReceipts={receipts} onClose={() => setShowReceipt(false)} onSave={onAddReceipt} toast={toast} />}
+      {showFolders && <FoldersModal budget={budget} receipts={receipts} onClose={() => setShowFolders(false)} />}
+      {delFor && <DeleteModal receipt={delFor} onClose={() => setDelFor(null)}
+        onAll={() => { onDeleteReceipt(delFor.id); setDelFor(null) }}
+        onImage={() => { onDeleteImage(delFor.id); setDelFor(null) }}
+        onAmount={() => { onToggleCounted(delFor.id); setDelFor(null) }} />}
+      {showDetail && <DetailModal budget={budget} receipts={receipts} onClose={() => setShowDetail(false)} />}
+      {moveFor && <MoveModal receipt={moveFor} budget={budget} budgets={budgets} onClose={() => setMoveFor(null)} onMove={(toType, toCatId) => { onMoveReceipt(budget.type, moveFor.id, toType, toCatId); setMoveFor(null) }} />}
+    </div>
+  )
+}
+
+// תיקיות קבלות — גלריה מסווגת לפי קטגוריות, עם תמונות מהמחסן
+function FoldersModal({ budget, receipts, onClose }) {
+  const isCity = budget.type === 'city'
+  const [urls, setUrls] = useState({})
+  const [open, setOpen] = useState(null)
+  useEffect(() => {
+    (async () => {
+      const paths = receipts.filter(r => r.imgPath).map(r => r.imgPath)
+      if (!paths.length) return
+      const { data } = await supa.storage.from('receipts').createSignedUrls(paths, 3600)
+      const map = {}
+      data?.forEach(d => { if (d.signedUrl) map[d.path] = d.signedUrl })
+      setUrls(map)
+    })()
+  }, [])
+  const folders = isCity
+    ? [{ id: null, name: 'קצבת עירייה', icon: 'default' }]
+    : budget.cats.map(c => ({ id: c.id, name: c.name, icon: c.icon }))
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="modal modal-wide" onClick={e => e.stopPropagation()}>
+        <div className="modal-head"><div><div className="eyebrow">{isCity ? 'קצבת עירייה' : 'כספי הורים'}</div><h3>תיקיות קבלות</h3></div><button className="modal-x" onClick={onClose}><X size={20} /></button></div>
+        <div className="modal-body">
+          {folders.map(f => {
+            const items = receipts.filter(r => (isCity ? true : r.catId === f.id))
+            const scanned = items.filter(r => r.imgPath), manual = items.filter(r => !r.hasReceipt)
+            return (
+              <div className="folder" key={f.id || 'city'}>
+                <div className="folder-head"><FolderOpen size={16} /> {f.name} <span className="dim">({items.length})</span>{manual.length > 0 && <em className="rt-badge">{manual.length} לשליחה פיזית</em>}</div>
+                {items.length === 0 ? <div className="folder-empty">אין קבלות בתיקייה זו</div> : (
+                  <div className="folder-grid">
+                    {scanned.map(r => (
+                      <button className="fthumb" key={r.id} onClick={() => setOpen(urls[r.imgPath])} title={`${r.store} · ${nis(r.amount)}`}>
+                        {urls[r.imgPath] ? <img src={urls[r.imgPath]} alt={r.store} /> : <ImageIcon size={22} />}
+                        <span className="fthumb-cap">{nis(r.amount)}<br />{heDate(r.date)}</span>
+                      </button>
+                    ))}
+                    {manual.map(r => (
+                      <div className="fthumb fthumb-manual" key={r.id} title="ללא קבלה סרוקה — לשלוח לגזברות">
+                        <Paperclip size={22} />
+                        <span className="fthumb-cap">{nis(r.amount)}<br />{r.store}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      </div>
+      {open && <div className="lightbox" onClick={e => { e.stopPropagation(); setOpen(null) }}><img src={open} alt="קבלה" /></div>}
+    </div>
+  )
+}
+
+// העברת קבלה בין קטגוריות / קופות
+function MoveModal({ receipt, budget, budgets, onClose, onMove }) {
+  const options = []
+  if (budgets.city) options.push({ type: 'city', catId: null, label: 'קצבת עירייה', icon: 'default' })
+  if (budgets.parents) (budgets.parents.cats || []).forEach(c => options.push({ type: 'parents', catId: c.id, label: c.name, icon: c.icon }))
+  const isCurrent = o => o.type === budget.type && (o.catId || null) === (receipt.catId || null)
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="modal" onClick={e => e.stopPropagation()}>
+        <div className="modal-head"><div><div className="eyebrow">{receipt.store} · {nis(receipt.amount)}</div><h3>העברה לקטגוריה אחרת</h3></div><button className="modal-x" onClick={onClose}><X size={20} /></button></div>
+        <div className="modal-body">
+          <p className="hint" style={{ marginTop: 0 }}>הסכום יעבור לקטגוריה שתבחרי, והיתרות יתעדכנו בשתי הקטגוריות מיד.</p>
+          <div className="cat-pick">
+            {options.map((o, i) => (
+              <button key={i} className={'cat-pick-btn' + (isCurrent(o) ? ' on' : '')} disabled={isCurrent(o)} onClick={() => onMove(o.type, o.catId)}>
+                <CatIcon name={o.icon} size={17} /> {o.label}{isCurrent(o) && ' (נוכחית)'}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// בורר מחיקה: הכול / רק הקבלה הסרוקה / רק הסכום
+function DeleteModal({ receipt, onClose, onAll, onImage, onAmount }) {
+  const notCounted = receipt.counted === false
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="modal" onClick={e => e.stopPropagation()}>
+        <div className="modal-head"><div><div className="eyebrow">{receipt.store} · {nis(receipt.amount)}</div><h3>מה למחוק?</h3></div><button className="modal-x" onClick={onClose}><X size={20} /></button></div>
+        <div className="modal-body del-opts">
+          <button className="del-opt danger" onClick={onAll}>
+            <Trash2 size={18} /><span><b>למחוק הכול</b><small>גם הסכום וגם הקבלה הסרוקה יימחקו לצמיתות</small></span>
+          </button>
+          {receipt.imgPath && (
+            <button className="del-opt" onClick={onImage}>
+              <ImageIcon size={18} /><span><b>למחוק רק את הקבלה הסרוקה</b><small>הסכום יישאר בחישוב ויסומן "לשלוח לגזברות"</small></span>
+            </button>
+          )}
+          <button className="del-opt" onClick={onAmount}>
+            <Coins size={18} /><span><b>{notCounted ? 'להחזיר את הסכום לחישוב' : 'למחוק רק את הסכום'}</b><small>{notCounted ? 'הסכום יחזור להיספר בהוצאות וביתרות' : 'הסכום יוסר מההוצאות והיתרות; הקבלה תישאר בתיקיות'}</small></span>
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// דוח מפורט בתוך האפליקציה — כמו באקסל: שורות הוצאה עם יתרה רצה, לפי קטגוריות
+function DetailModal({ budget, receipts, onClose }) {
+  const isCity = budget.type === 'city'
+  const counted = receipts.filter(r => r.counted !== false).slice().sort((a, b) => String(a.date).localeCompare(String(b.date)))
+  const income = budget.received || 0
+  const pulses = (budget.pulses || []).slice().sort((a, b) => String(a.date).localeCompare(String(b.date)))
+  const section = (title, icon, opening, rows) => {
+    let bal = opening
+    const total = rows.reduce((s, r) => s + r.amount, 0)
+    return (
+      <div className="dt-section" key={title}>
+        <div className="dt-head"><CatIcon name={icon} size={16} /> {title}</div>
+        <div className="dt-table">
+          <div className="dt-row dt-th"><span>תאריך</span><span>פירוט</span><span>סכום</span><span>יתרה</span></div>
+          <div className="dt-row dt-open"><span></span><span>הכנסה בפועל</span><span></span><span>{nis(opening)}</span></div>
+          {rows.map(r => { bal -= r.amount; return (
+            <div className="dt-row" key={r.id}>
+              <span>{heDate(r.date)}</span>
+              <span className="dt-store">{!r.hasReceipt && <Paperclip size={12} className="rt-ico warn" />}{r.store}</span>
+              <span>{nis(r.amount)}</span>
+              <span className={bal < 0 ? 'neg' : ''}>{nis(bal)}</span>
+            </div>
+          )})}
+          <div className="dt-row dt-sum"><span></span><span>סה"כ הוצאות</span><span>{nis(total)}</span><span className={opening - total < 0 ? 'neg' : ''}>{nis(opening - total)}</span></div>
+        </div>
+      </div>
+    )
+  }
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="modal modal-wide" onClick={e => e.stopPropagation()}>
+        <div className="modal-head"><div><div className="eyebrow">{isCity ? 'קצבת עירייה' : 'כספי הורים'}</div><h3>דוח מפורט</h3></div><button className="modal-x" onClick={onClose}><X size={20} /></button></div>
+        <div className="modal-body">
+          <div className="dt-summary">
+            <div><span>נכנס עד כה</span><b>{nis(income)}</b></div>
+            <div><span>סה"כ הוצאות</span><b>{nis(budget.spent || 0)}</b></div>
+            <div><span>יתרה בקופה</span><b className={income - (budget.spent || 0) < 0 ? 'neg' : 'pos'}>{nis(income - (budget.spent || 0))}</b></div>
+          </div>
+          {pulses.length > 0 && (
+            <div className="dt-section">
+              <div className="dt-head"><TrendingUp size={16} /> הכנסות</div>
+              <div className="dt-table">
+                <div className="dt-row dt-th"><span>תאריך</span><span>פירוט</span><span>סכום</span><span></span></div>
+                {pulses.map((p, i) => <div className="dt-row" key={p.id}><span>{heDate(p.date)}</span><span>{p.note || `פעימה ${i + 1}`}</span><span>{nis(p.amount)}</span><span></span></div>)}
+                <div className="dt-row dt-sum"><span></span><span>סה"כ</span><span>{nis(income)}</span><span></span></div>
+              </div>
+            </div>
+          )}
+          {isCity
+            ? section('הוצאות מהקצבה', 'default', income, counted)
+            : budget.cats.map(c => section(`${c.name}`, c.icon, c.allocated, counted.filter(r => r.catId === c.id)))}
+        </div>
+      </div>
     </div>
   )
 }
@@ -534,7 +737,7 @@ function Dashboard({ profile, access, onLogout, toast }) {
       const { data: r } = await supa.from('receipts').select('*').eq('user_id', profile.id).order('created_at', { ascending: false })
       if (r) {
         const grouped = { city: [], parents: [] }
-        r.forEach(row => grouped[row.budget_type].push({ id: row.id, amount: Number(row.amount), store: row.store, date: row.receipt_date, catId: row.cat_id, img: row.img }))
+        r.forEach(row => grouped[row.budget_type].push({ id: row.id, amount: Number(row.amount), store: row.store, date: row.receipt_date, catId: row.cat_id, imgPath: row.img_path, imgHash: row.img_hash, hasReceipt: row.has_receipt !== false, counted: row.counted !== false }))
         setReceipts(grouped)
       }
       setLoaded(true)
@@ -564,15 +767,68 @@ function Dashboard({ profile, access, onLogout, toast }) {
     return { ...b, [type]: nb }
   })
   const addReceipt = async (type, r) => {
-    setReceipts(rs => ({ ...rs, [type]: [r, ...(rs[type] || [])] }))
+    let imgPath = null
+    if (r.img) {
+      imgPath = `${profile.id}/${r.id}.jpg`
+      const blob = await (await fetch(r.img)).blob()
+      const { error: upErr } = await supa.storage.from('receipts').upload(imgPath, blob, { contentType: 'image/jpeg' })
+      if (upErr) { toast('העלאת התמונה נכשלה, נסי שוב', 'bad'); return }
+    }
+    const rec = { ...r, imgPath, img: undefined }
+    setReceipts(rs => ({ ...rs, [type]: [rec, ...(rs[type] || [])] }))
     setBudgets(b => { const bd = b[type]; const nb = { ...bd, spent: (bd.spent || 0) + r.amount }; if (type === 'parents' && r.catId) nb.cats = bd.cats.map(c => c.id === r.catId ? { ...c, spent: c.spent + r.amount } : c); return { ...b, [type]: nb } })
-    await supa.from('receipts').insert({ id: r.id, user_id: profile.id, budget_type: type, cat_id: r.catId, amount: r.amount, store: r.store, receipt_date: r.date, img: r.img })
+    const { error } = await supa.from('receipts').insert({ id: r.id, user_id: profile.id, budget_type: type, cat_id: r.catId, amount: r.amount, store: r.store, receipt_date: r.date, img_path: imgPath, img_hash: r.imgHash, has_receipt: r.hasReceipt })
+    if (error) {
+      // ביטול העדכון המקומי כדי שלא יוצג מידע שלא נשמר באמת
+      setReceipts(rs => ({ ...rs, [type]: rs[type].filter(x => x.id !== r.id) }))
+      setBudgets(b => { const bd = b[type]; const nb = { ...bd, spent: Math.max(0, (bd.spent || 0) - r.amount) }; if (type === 'parents' && r.catId) nb.cats = bd.cats.map(c => c.id === r.catId ? { ...c, spent: Math.max(0, c.spent - r.amount) } : c); return { ...b, [type]: nb } })
+      toast('שמירת הקבלה נכשלה — נסי שוב', 'bad')
+    } else toast(r.hasReceipt ? 'הקבלה נשמרה' : 'ההוצאה נשמרה — סומנה לשליחה לגזברות', 'good')
+  }
+  const moveReceipt = async (fromType, id, toType, toCatId) => {
+    const r = (receipts[fromType] || []).find(x => x.id === id); if (!r) return
+    const upd = { ...r, catId: toCatId }
+    setReceipts(rs => {
+      const out = { ...rs, [fromType]: rs[fromType].filter(x => x.id !== id) }
+      out[toType] = [upd, ...(out[toType] || [])].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+      return out
+    })
+    if (r.counted !== false) setBudgets(b => {
+      const nb = { ...b }
+      const from = { ...nb[fromType], spent: Math.max(0, (nb[fromType].spent || 0) - r.amount) }
+      if (fromType === 'parents' && r.catId) from.cats = from.cats.map(c => c.id === r.catId ? { ...c, spent: Math.max(0, c.spent - r.amount) } : c)
+      nb[fromType] = from
+      const to = { ...nb[toType], spent: (nb[toType].spent || 0) + r.amount }
+      if (toType === 'parents' && toCatId) to.cats = to.cats.map(c => c.id === toCatId ? { ...c, spent: c.spent + r.amount } : c)
+      nb[toType] = to
+      return nb
+    })
+    const { error } = await supa.from('receipts').update({ budget_type: toType, cat_id: toCatId }).eq('id', id)
+    if (error) toast('ההעברה לא נשמרה — רענני ונסי שוב', 'bad')
+    else toast('הקבלה הועברה', 'good')
+  }
+  const deleteImageOnly = async (type, id) => {
+    const r = (receipts[type] || []).find(x => x.id === id); if (!r || !r.imgPath) return
+    setReceipts(rs => ({ ...rs, [type]: rs[type].map(x => x.id === id ? { ...x, imgPath: null, imgHash: null, hasReceipt: false } : x) }))
+    await supa.storage.from('receipts').remove([r.imgPath])
+    const { error } = await supa.from('receipts').update({ img_path: null, img_hash: null, has_receipt: false }).eq('id', id)
+    toast(error ? 'המחיקה לא נשמרה' : 'הקבלה הסרוקה נמחקה — הסכום נשאר וסומן לשליחה לגזברות', error ? 'bad' : 'good')
+  }
+  const toggleCounted = async (type, id) => {
+    const r = (receipts[type] || []).find(x => x.id === id); if (!r) return
+    const to = r.counted === false            // false -> החזרה לחישוב, true -> הוצאה מהחישוב
+    const delta = to ? r.amount : -r.amount
+    setReceipts(rs => ({ ...rs, [type]: rs[type].map(x => x.id === id ? { ...x, counted: to } : x) }))
+    setBudgets(b => { const bd = b[type]; const nb = { ...bd, spent: Math.max(0, (bd.spent || 0) + delta) }; if (type === 'parents' && r.catId) nb.cats = bd.cats.map(c => c.id === r.catId ? { ...c, spent: Math.max(0, c.spent + delta) } : c); return { ...b, [type]: nb } })
+    const { error } = await supa.from('receipts').update({ counted: to }).eq('id', id)
+    toast(error ? 'הפעולה לא נשמרה' : to ? 'הסכום הוחזר לחישוב' : 'הסכום הוסר מהחישוב — הקבלה נשארה בתיקיות', error ? 'bad' : 'good')
   }
   const delReceipt = async (type, id) => {
     const r = (receipts[type] || []).find(x => x.id === id); if (!r) return
     setReceipts(rs => ({ ...rs, [type]: rs[type].filter(x => x.id !== id) }))
-    setBudgets(b => { const bd = b[type]; const nb = { ...bd, spent: Math.max(0, (bd.spent || 0) - r.amount) }; if (type === 'parents' && r.catId) nb.cats = bd.cats.map(c => c.id === r.catId ? { ...c, spent: Math.max(0, c.spent - r.amount) } : c); return { ...b, [type]: nb } })
+    if (r.counted !== false) setBudgets(b => { const bd = b[type]; const nb = { ...bd, spent: Math.max(0, (bd.spent || 0) - r.amount) }; if (type === 'parents' && r.catId) nb.cats = bd.cats.map(c => c.id === r.catId ? { ...c, spent: Math.max(0, c.spent - r.amount) } : c); return { ...b, [type]: nb } })
     await supa.from('receipts').delete().eq('id', id)
+    if (r.imgPath) await supa.storage.from('receipts').remove([r.imgPath])
   }
   const current = budgets[tab]
   return (
@@ -589,7 +845,7 @@ function Dashboard({ profile, access, onLogout, toast }) {
         {!current ? (
           <div className="empty"><div className="empty-ic">{tab === 'city' ? <Building2 size={46} strokeWidth={1.5} /> : <Users size={46} strokeWidth={1.5} />}</div><h2>{tab === 'city' ? 'מעקב קצבת עירייה' : 'הגדרת תשלומי הורים'}</h2><p>{tab === 'city' ? 'אין צורך בסכום שנתי מראש — פשוט רשמי כל פעימת הכנסה מהעירייה וצלמי קבלות, והיתרה תתעדכן לבד.' : 'הגדירי כמה משלם כל הורה, מספר הילדים, וההתפלגות בין הקטגוריות — או ייבאי אקסל.'}</p><button className="btn btn-primary" onClick={() => setSetupFor(tab)}><Plus size={18} /> {tab === 'city' ? 'התחלת מעקב' : 'הגדרת תקציב'}</button></div>
         ) : (
-          <BudgetPanel budget={current} receipts={receipts[tab] || []} onAddPulse={(p) => addPulse(tab, p)} onAddReceipt={(r) => addReceipt(tab, r)} onDeleteReceipt={(id) => delReceipt(tab, id)} onDeletePulse={(id) => delPulse(tab, id)} onEdit={() => setSetupFor(tab)} toast={toast} />
+          <BudgetPanel budget={current} receipts={receipts[tab] || []} onAddPulse={(p) => addPulse(tab, p)} onAddReceipt={(r) => addReceipt(tab, r)} onDeleteReceipt={(id) => delReceipt(tab, id)} onDeleteImage={(id) => deleteImageOnly(tab, id)} onToggleCounted={(id) => toggleCounted(tab, id)} onDeletePulse={(id) => delPulse(tab, id)} onMoveReceipt={moveReceipt} budgets={budgets} onEdit={() => setSetupFor(tab)} toast={toast} />
         )}
       </main>
       {setupFor === 'city' && <CitySetup existing={budgets.city} onClose={() => setSetupFor(null)} onSave={(d) => saveBudget('city', d)} toast={toast} />}
