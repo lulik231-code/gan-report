@@ -358,7 +358,7 @@ function ReceiptModal({ budget, allReceipts, onClose, onSave, toast }) {
   )
 }
 
-function BudgetPanel({ budget, budgets, receipts, onAddPulse, onAddReceipt, onEdit, onDeleteReceipt, onDeleteImage, onToggleCounted, onDeletePulse, onMoveReceipt, toast }) {
+function BudgetPanel({ budget, budgets, receipts, onAddPulse, onAddReceipt, onEdit, onDeleteReceipt, onDeleteImage, onToggleCounted, onDeletePulse, onMoveReceipt, onReconcile, toast }) {
   const [showPulse, setShowPulse] = useState(false), [showReceipt, setShowReceipt] = useState(false)
   const [showFolders, setShowFolders] = useState(false), [moveFor, setMoveFor] = useState(null)
   const [delFor, setDelFor] = useState(null), [showDetail, setShowDetail] = useState(false)
@@ -400,6 +400,17 @@ function BudgetPanel({ budget, budgets, receipts, onAddPulse, onAddReceipt, onEd
       {pulses.length > 0 && (
         <div className="log-block"><div className="log-title"><TrendingUp size={16} /> פעימות הכנסה</div><div className="log-list">{pulses.map((p, i) => <div className="log-row" key={p.id}><span className="log-idx">{i + 1}</span><div className="log-main"><div className="log-a">{nis(p.amount)}</div>{p.note && <div className="log-note">{p.note}</div>}</div><span className="log-date">{heDate(p.date)}</span><button className="log-del" onClick={() => { if (confirm('למחוק את הפעימה? הסכום יתבטל גם מהקטגוריות.')) onDeletePulse(p.id) }} title="מחיקת פעימה"><Trash2 size={15} /></button></div>)}</div></div>
       )}
+      {(() => {
+        const realSpent = (receipts || []).filter(r => r.counted !== false).reduce((s, r) => s + r.amount, 0)
+        const ghost = Math.round(((budget.spent || 0) - realSpent) * 100) / 100
+        if (ghost <= 0.005) return null
+        return (
+          <div className="ghost-banner">
+            <div className="gb-txt"><Ban size={16} /> יש {nis(ghost)} הוצאות ישנות שאין להן קבלה למחיקה (נרשמו בגרסה קודמת). אפשר לנקות אותן בלחיצה — ההכנסות והקבלות הקיימות לא ייפגעו.</div>
+            <button className="gb-btn" onClick={() => { if (confirm('לנקות את ההוצאות הישנות שאין להן קבלה? ההוצאות יחושבו מחדש לפי הקבלות הקיימות בלבד.')) onReconcile() }}>ניקוי הוצאות ישנות</button>
+          </div>
+        )
+      })()}
       <div className="log-block">
         <div className="log-title"><Receipt size={16} /> קבלות {receipts.length > 0 && <span className="dim">({receipts.length})</span>}</div>
         {receipts.length === 0 ? <div className="empty-rows">עדיין אין קבלות. צלמי את הראשונה.</div> : (
@@ -823,6 +834,17 @@ function Dashboard({ profile, access, onLogout, toast }) {
     const { error } = await supa.from('receipts').update({ counted: to }).eq('id', id)
     toast(error ? 'הפעולה לא נשמרה' : to ? 'הסכום הוחזר לחישוב' : 'הסכום הוסר מהחישוב — הקבלה נשארה בתיקיות', error ? 'bad' : 'good')
   }
+  const reconcileSpent = async (type) => {
+    const recs = (receipts[type] || []).filter(r => r.counted !== false)
+    setBudgets(b => {
+      const bd = b[type]; if (!bd) return b
+      const spent = recs.reduce((s, r) => s + r.amount, 0)
+      const nb = { ...bd, spent }
+      if (type === 'parents' && bd.cats) nb.cats = bd.cats.map(c => ({ ...c, spent: recs.filter(r => r.catId === c.id).reduce((s, r) => s + r.amount, 0) }))
+      return { ...b, [type]: nb }
+    })
+    toast('ההוצאות סונכרנו לפי הקבלות הקיימות', 'good')
+  }
   const delReceipt = async (type, id) => {
     const r = (receipts[type] || []).find(x => x.id === id); if (!r) return
     setReceipts(rs => ({ ...rs, [type]: rs[type].filter(x => x.id !== id) }))
@@ -845,7 +867,7 @@ function Dashboard({ profile, access, onLogout, toast }) {
         {!current ? (
           <div className="empty"><div className="empty-ic">{tab === 'city' ? <Building2 size={46} strokeWidth={1.5} /> : <Users size={46} strokeWidth={1.5} />}</div><h2>{tab === 'city' ? 'מעקב קצבת עירייה' : 'הגדרת תשלומי הורים'}</h2><p>{tab === 'city' ? 'אין צורך בסכום שנתי מראש — פשוט רשמי כל פעימת הכנסה מהעירייה וצלמי קבלות, והיתרה תתעדכן לבד.' : 'הגדירי כמה משלם כל הורה, מספר הילדים, וההתפלגות בין הקטגוריות — או ייבאי אקסל.'}</p><button className="btn btn-primary" onClick={() => setSetupFor(tab)}><Plus size={18} /> {tab === 'city' ? 'התחלת מעקב' : 'הגדרת תקציב'}</button></div>
         ) : (
-          <BudgetPanel budget={current} receipts={receipts[tab] || []} onAddPulse={(p) => addPulse(tab, p)} onAddReceipt={(r) => addReceipt(tab, r)} onDeleteReceipt={(id) => delReceipt(tab, id)} onDeleteImage={(id) => deleteImageOnly(tab, id)} onToggleCounted={(id) => toggleCounted(tab, id)} onDeletePulse={(id) => delPulse(tab, id)} onMoveReceipt={moveReceipt} budgets={budgets} onEdit={() => setSetupFor(tab)} toast={toast} />
+          <BudgetPanel budget={current} receipts={receipts[tab] || []} onAddPulse={(p) => addPulse(tab, p)} onAddReceipt={(r) => addReceipt(tab, r)} onDeleteReceipt={(id) => delReceipt(tab, id)} onDeleteImage={(id) => deleteImageOnly(tab, id)} onToggleCounted={(id) => toggleCounted(tab, id)} onDeletePulse={(id) => delPulse(tab, id)} onMoveReceipt={moveReceipt} onReconcile={() => reconcileSpent(tab)} budgets={budgets} onEdit={() => setSetupFor(tab)} toast={toast} />
         )}
       </main>
       {setupFor === 'city' && <CitySetup existing={budgets.city} onClose={() => setSetupFor(null)} onSave={(d) => saveBudget('city', d)} toast={toast} />}
